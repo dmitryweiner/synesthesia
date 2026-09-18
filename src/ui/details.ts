@@ -9,6 +9,7 @@ import type { SoundAnalysis } from '../analysis/fractal';
 import { make } from './dom';
 
 function fmt(v: number): string {
+  if (Number.isInteger(v)) return String(v);
   const a = Math.abs(v);
   if (a >= 100) return v.toFixed(0);
   if (a >= 10) return v.toFixed(1);
