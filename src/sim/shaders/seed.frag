@@ -8,6 +8,7 @@ out vec4 fragColor;
 uniform int uSpotCount;
 uniform vec2 uSpots[24];
 uniform float uSpotRadius;
+uniform float uAspect; // grid width / height — spots stay round on non-square grids
 
 void main() {
   vec2 uv = vUv;
@@ -15,7 +16,8 @@ void main() {
   float v = 0.0;
   for (int i = 0; i < 24; i++) {
     if (i >= uSpotCount) break;
-    float d = distance(uv, uSpots[i]);
+    vec2 dv = (uv - uSpots[i]) * vec2(uAspect, 1.0);
+    float d = length(dv);
     float blob = smoothstep(uSpotRadius, uSpotRadius * 0.2, d);
     v = max(v, blob * 0.5);
     u = mix(u, 0.5, blob);

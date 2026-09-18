@@ -23,7 +23,8 @@ const EVOLVE_DT = 1 / 60; // nominal frame time; evolveT is an aesthetic drift, 
 
 export interface SimEngineOptions {
   canvas: HTMLCanvasElement;
-  resolution: number;
+  width: number;
+  height: number;
 }
 
 export class SimEngine {
@@ -35,7 +36,6 @@ export class SimEngine {
   private state: PingPongTarget;
   private velocity: SingleTarget;
   private paramField: SingleTarget;
-  private resolution: number;
   private evolveT = 0;
 
   private readonly seedProgram: WebGLProgram;
@@ -48,10 +48,9 @@ export class SimEngine {
   constructor(opts: SimEngineOptions) {
     const gl = createGL2(opts.canvas);
     this.gl = gl;
-    this.resolution = opts.resolution;
-    this.state = new PingPongTarget(gl, opts.resolution, opts.resolution);
-    this.velocity = new SingleTarget(gl, opts.resolution, opts.resolution);
-    this.paramField = new SingleTarget(gl, opts.resolution, opts.resolution);
+    this.state = new PingPongTarget(gl, opts.width, opts.height);
+    this.velocity = new SingleTarget(gl, opts.width, opts.height);
+    this.paramField = new SingleTarget(gl, opts.width, opts.height);
     this.seedProgram = createProgram(gl, FULLSCREEN_VERT, composeFragmentShader(commonGlsl, seedFrag));
     this.reactProgram = createProgram(gl, FULLSCREEN_VERT, composeFragmentShader(commonGlsl, reactFrag));
     this.displayProgram = createProgram(gl, FULLSCREEN_VERT, composeFragmentShader(commonGlsl, displayFrag));
@@ -59,6 +58,11 @@ export class SimEngine {
     this.advectProgram = createProgram(gl, FULLSCREEN_VERT, composeFragmentShader(commonGlsl, advectFrag));
     this.paramfieldProgram = createProgram(gl, FULLSCREEN_VERT, composeFragmentShader(commonGlsl, paramfieldFrag));
     this.reseed();
+  }
+
+  /** Grid width / height: noise and seed spots are laid out in aspect-corrected UV. */
+  private get aspect(): number {
+    return this.state.width / this.state.height;
   }
 
   /** Paints a fresh random start into BOTH buffers. */
@@ -73,6 +77,7 @@ export class SimEngine {
       uSpotCount: u1i(spotCount),
       uSpots: u2fv(spots),
       uSpotRadius: u1f(0.02 + Math.random() * 0.03),
+      uAspect: u1f(this.aspect),
     };
     runPass(this.gl, this.seedProgram, uniforms, this.state.writeTarget);
     this.state.swap();
@@ -90,6 +95,7 @@ export class SimEngine {
       uKillVarScale: u1f(f.killVarScale),
       uKillVarWarp: u1f(f.killVarWarp),
       uEvolveT: u1f(this.evolveT),
+      uAspect: u1f(this.aspect),
     }, this.paramField.target);
   }
 
@@ -101,6 +107,7 @@ export class SimEngine {
       uCurlScale: u1f(flow.curlScale),
       uDrift: u2f(flow.driftX, -flow.driftY),
       uEvolveT: u1f(this.evolveT),
+      uAspect: u1f(this.aspect),
     }, this.velocity.target);
   }
 
@@ -151,12 +158,11 @@ export class SimEngine {
     }, null);
   }
 
-  /** Changes the simulation grid resolution, preserving the current pattern. */
-  setResolution(resolution: number): void {
-    if (resolution === this.resolution) return;
-    this.resolution = resolution;
-    this.state.resize(resolution, resolution);
-    this.velocity.resize(resolution, resolution);
-    this.paramField.resize(resolution, resolution);
+  /** Changes the simulation grid size, preserving the current pattern (blit). */
+  setGrid(width: number, height: number): void {
+    if (width === this.state.width && height === this.state.height) return;
+    this.state.resize(width, height);
+    this.velocity.resize(width, height);
+    this.paramField.resize(width, height);
   }
 }

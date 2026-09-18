@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <meta name="theme-color" content="#0d1117" />
+    <title>Synesthesia — sound &amp; image, steered by you</title>
+  </head>
+  <body>
+    <div id="app">
+      <header id="topbar">
+        <span id="brand">Synesthesia</span>
+        <button id="audioBtn" class="tb-btn primary" title="Start / stop sound (Space)">▶ Sound</button>
+        <label id="volLab" title="Volume">🔊<input id="volume" type="range" min="0" max="1" step="0.01" value="0.75" /></label>
+        <select id="presetSel" title="Built-in and saved points"></select>
+        <button id="undoBtn" class="tb-btn" title="Undo the last change (Backspace)" disabled>↩ Undo</button>
+        <button id="reseedBtn" class="tb-btn" title="Restart the image pattern from fresh seeds">🌱 Reseed</button>
+        <span class="tb-spacer"></span>
+        <button id="saveBtn" class="tb-btn" title="Save this point in your browser">💾 Save</button>
+        <button id="shareBtn" class="tb-btn" title="Copy a link to this point">🔗 Share</button>
+        <button id="detailsBtn" class="tb-btn" title="Show what this point is made of">ⓘ Details</button>
+        <button id="helpBtn" class="tb-btn" title="How it works">?</button>
+      </header>
+      <main id="viewWrap">
+        <canvas id="view"></canvas>
+        <p id="webglError" hidden>
+          WebGL2 (with EXT_color_buffer_float) is required. Please use an up-to-date desktop or mobile browser.
+        </p>
+        <aside id="details" hidden></aside>
+        <div id="hud">
+          <p id="status"></p>
+          <div id="feedback">
+            <button id="dislikeBtn" class="fb-btn dislike" title="Go back and try something else (←)">👎 Not this</button>
+            <button id="surpriseBtn" class="fb-btn surprise" title="Jump somewhere new (↑)">🎲 Surprise</button>
+            <button id="likeBtn" class="fb-btn like" title="More of this (→)">👍 More of this</button>
+          </div>
+        </div>
+        <div id="help" hidden>
+          <div id="helpBox">
+            <h2>Synesthesia</h2>
+            <p>One point in a big parameter space makes both the sound and the picture. You steer the search:</p>
+            <ul>
+              <li><b>👍 More of this</b> — keep going in this direction (smaller steps).</li>
+              <li><b>👎 Not this</b> — go back to the last thing you liked and try another direction (bigger steps).</li>
+              <li><b>🎲 Surprise</b> — jump near a random built-in preset.</li>
+              <li><b>↩ Undo</b> — revert the last change (up to 5).</li>
+              <li><b>💾 Save</b> / <b>🔗 Share</b> — keep the point in this browser, or copy a link to it. The URL always holds the current point.</li>
+            </ul>
+            <p>Sound and image share the same slow LFOs, and loudness, timbre and onsets of the sound push the picture around live. Press <b>▶ Sound</b> to start audio (browsers need a click for that).</p>
+            <p>Keys: ← 👎 · → 👍 · ↑ 🎲 · Backspace ↩ · Space ▶</p>
+            <button id="helpCloseBtn" class="tb-btn primary">Got it</button>
+          </div>
+        </div>
+      </main>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

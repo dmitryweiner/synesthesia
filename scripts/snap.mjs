@@ -1,0 +1,43 @@
+#!/usr/bin/env node
+// Reusable debug screenshot of the app. Extend with flags instead of
+// writing one-off Playwright scripts.
+//
+//   node scripts/snap.mjs --out shots/x.png [--preset N] [--hash token] [--wait ms]
+//                         [--sound] [--like N] [--dislike N] [--details] [--help]
+//                         [--width px] [--height px] [--res N] [--preview]
+import { mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { parseFlags, ensureServer, launchBrowser, captureErrors, openApp, withRes } from './lib.mjs';
+
+const { flags } = parseFlags(process.argv.slice(2), ['out', 'preset', 'hash', 'wait', 'like', 'dislike', 'width', 'height', 'res']);
+if (!flags.has('out')) {
+  console.error('usage: node scripts/snap.mjs --out <path> [--preset N] [--hash token] [--wait ms] '
+    + '[--sound] [--like N] [--dislike N] [--details] [--help] [--width px] [--height px] [--preview]');
+  process.exit(1);
+}
+const { BASE, stop } = await ensureServer(flags.has('preview'));
+const errors = [];
+const browser = await launchBrowser();
+const page = await browser.newPage({
+  viewport: { width: Number(flags.get('width')) || 1280, height: Number(flags.get('height')) || 820 },
+});
+captureErrors(page, errors);
+
+const url = flags.has('hash') ? `${BASE}/#s=${flags.get('hash')}`
+  : flags.has('preset') ? `${BASE}/?preset=${flags.get('preset')}` : BASE;
+await openApp(page, withRes(url, Number(flags.get('res') ?? 0)), { keepHelp: flags.has('help') });
+if (flags.has('sound')) { await page.locator('#audioBtn').click(); await page.waitForTimeout(800); }
+for (let i = 0; i < Number(flags.get('like') ?? 0); i++) { await page.locator('#likeBtn').click(); await page.waitForTimeout(2400); }
+for (let i = 0; i < Number(flags.get('dislike') ?? 0); i++) { await page.locator('#dislikeBtn').click(); await page.waitForTimeout(2400); }
+if (flags.has('details')) await page.locator('#detailsBtn').click();
+await page.waitForTimeout(Number(flags.get('wait')) || 3000);
+
+const out = flags.get('out');
+mkdirSync(dirname(out), { recursive: true });
+await page.screenshot({ path: out });
+console.log(out);
+console.log('#status:', await page.locator('#status').textContent());
+console.log('errors:', errors.length ? errors : 'none');
+await browser.close();
+stop();
+process.exit(errors.length ? 2 : 0);
