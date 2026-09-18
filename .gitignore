@@ -5,3 +5,6 @@ shots/
 *.log
 .vite
 .DS_Store
+
+# the original brief, kept locally only
+PROMT.md
