@@ -26,11 +26,24 @@ import type { Genome } from './genome/codec';
 import { diffSummary, lerpGenome } from './genome/evolve';
 import { Explorer } from './genome/explorer';
 import type { ExplorerAction } from './genome/explorer';
+import { Scout } from './genome/scout';
+import type { ScoutPick } from './genome/scout';
+import { analyzeSound } from './analysis/fractal';
 
 const MORPH_SECONDS = 2.0;
 const UNDO_MORPH_SECONDS = 0.8;
 const AUDIO_PUSH_INTERVAL = 0.05; // s — how often a morph re-sends params to the worklets
 const HELP_SHOWN_KEY = 'synesthesia_help_shown';
+// Scout (PLAN.md decision 7): offline-render + score candidates in the
+// background while the user listens. `?scout=0` turns it off.
+const SCOUT_ENABLED = new URLSearchParams(location.search).get('scout') !== '0';
+// 24 s at 8 kHz costs about the same as 8 s at 16 kHz but ranks candidates
+// far closer to a 30 s / 22 kHz reference (Spearman ρ 0.73 vs 0.23, measured
+// with `analyze.mjs --configs`): slow LFOs need the long window, the fractal
+// metrics don't need high frequencies.
+const SCOUT_SECONDS = 24;
+const SCOUT_SR = 8000;
+const SCOUT_DELAY_MS = 800; // after a morph settles, before rendering starts
 
 const canvas = el('view', HTMLCanvasElement);
 const webglError = el('webglError', HTMLParagraphElement);
@@ -128,9 +141,11 @@ function boot(): void {
   const explorer = new Explorer(encodeGenome(state));
   let stepCount = 0;
 
-  // Morph bookkeeping: live genome eases from `morphFrom` to `morphTo`.
+  // Morph bookkeeping: `live` eases from `morphFrom` to `morphTo`; a press
+  // mid-morph starts the next morph from `live` (what's audible/visible now).
   let morphFrom: Genome = explorer.current;
   let morphTo: Genome = explorer.current;
+  let live: Genome = explorer.current;
   let morphStart = 0;
   let morphSeconds = MORPH_SECONDS;
   let morphDone = true;
@@ -158,7 +173,7 @@ function boot(): void {
   }
 
   function startMorph(to: Genome, seconds: number): void {
-    morphFrom = lerpGenome(morphFrom, morphTo, morphProgress());
+    morphFrom = live;
     morphTo = to;
     morphStart = performance.now() / 1000;
     morphSeconds = seconds;
@@ -176,7 +191,7 @@ function boot(): void {
     const p = morphProgress();
     // ease-in-out so the change reads as a glide, not a jump
     const eased = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
-    const live = lerpGenome(morphFrom, morphTo, p >= 1 ? 1 : eased);
+    live = lerpGenome(morphFrom, morphTo, p >= 1 ? 1 : eased);
     applyToEngines(decodeGenome(live), p >= 1);
     if (p >= 1) {
       morphDone = true;
@@ -222,8 +237,44 @@ function boot(): void {
   }
 
   function onSettled(): void {
-    if (!details.hidden) renderDetails(details, state);
+    if (!details.hidden) renderDetails(details, state, scout?.parent ?? null);
     history.replaceState(null, '', `#s=${encodeStateToken(currentState())}`);
+    scheduleScout();
+  }
+
+  // --- scout ---------------------------------------------------------------
+  const scout = SCOUT_ENABLED
+    ? new Scout({
+      k: 3,
+      render: (s) => AudioEngine.renderOffline(
+        { masterGain: s.audio.masterGain, fx: s.audio.fx, formulas: s.audio.formulas, mod: s.mod },
+        SCOUT_SECONDS, SCOUT_SR,
+      ),
+      analyze: (x) => analyzeSound(x, SCOUT_SR),
+      onProgress: () => {
+        document.body.dataset.scout = `${scout?.ready('like') ?? 0}/${scout?.ready('dislike') ?? 0}`;
+        if (!details.hidden) renderDetails(details, state, scout?.parent ?? null);
+      },
+    })
+    : null;
+  let scoutTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function scheduleScout(): void {
+    if (!scout || scout.disabled) return;
+    if (scoutTimer !== null) clearTimeout(scoutTimer);
+    scoutTimer = setTimeout(() => {
+      scoutTimer = null;
+      if (!audio.running || !morphDone) return;
+      document.body.dataset.scout = '0/0';
+      scout.prepare(explorer, masterGain);
+    }, SCOUT_DELAY_MS);
+  }
+
+  function stopScout(): void {
+    if (scoutTimer !== null) clearTimeout(scoutTimer);
+    scoutTimer = null;
+    scout?.cancel();
+    delete document.body.dataset.scout;
   }
 
   let userPresets: UserPreset[] = loadUserPresets();
@@ -254,26 +305,30 @@ function boot(): void {
   }
 
   // --- actions -----------------------------------------------------------
-  function afterAction(prev: Genome, seconds: number): void {
+  function afterAction(prev: Genome, seconds: number, pick: ScoutPick | null = null): void {
+    stopScout();
     stepCount++;
     presetName = undefined;
     presetSel.value = '';
     startMorph(explorer.current, seconds);
     refreshUndo();
-    setStatus(`${actionLabel(explorer.lastAction)} · step ${stepCount} · spread ${explorer.sigma.toFixed(2)}\n${describeChange(prev, explorer.current)}`);
+    const scouted = pick ? ` · scouted: best of ${pick.of} (fractal ${pick.analysis.score.toFixed(2)})` : '';
+    setStatus(`${actionLabel(explorer.lastAction)} · step ${stepCount} · spread ${explorer.sigma.toFixed(2)}${scouted}\n${describeChange(prev, explorer.current)}`);
   }
 
   function like(): void {
     const prev = explorer.current;
-    explorer.like();
-    afterAction(prev, MORPH_SECONDS);
+    const pick = scout?.take(explorer, 'like') ?? null;
+    explorer.like(pick?.genome);
+    afterAction(prev, MORPH_SECONDS, pick);
     flash(likeBtn, '👍 Liked');
   }
 
   function dislike(): void {
     const prev = explorer.current;
-    explorer.dislike();
-    afterAction(prev, MORPH_SECONDS);
+    const pick = scout?.take(explorer, 'dislike') ?? null;
+    explorer.dislike(pick?.genome);
+    afterAction(prev, MORPH_SECONDS, pick);
     flash(dislikeBtn, '👎 Noted');
   }
 
@@ -299,10 +354,12 @@ function boot(): void {
     presetName = s.presetName;
     masterGain = s.audio.masterGain;
     volume.value = String(masterGain);
+    stopScout();
     explorer.load(encodeGenome(s));
     stepCount = 0;
     morphFrom = explorer.current;
     morphTo = explorer.current;
+    live = explorer.current;
     morphDone = true;
     applyToEngines(decodeGenome(explorer.current), true);
     sim.reseed();
@@ -360,7 +417,7 @@ function boot(): void {
 
   detailsBtn.addEventListener('click', () => {
     details.hidden = !details.hidden;
-    if (!details.hidden) renderDetails(details, state);
+    if (!details.hidden) renderDetails(details, state, scout?.parent ?? null);
   });
 
   function openHelp(): void { helpBox.hidden = false; }
@@ -393,11 +450,13 @@ function boot(): void {
       tracker = new FeatureTracker(audio.sampleRate);
     }
     lastAudioPush = -1;
+    scheduleScout();
   }
 
   async function stopAudio(): Promise<void> {
     if (!audio.running) return;
     clockOffset = performance.now() / 1000 - audio.time; // keep the LFO clock continuous
+    stopScout();
     await audio.stop();
     tracker = null;
     features = { ...SILENT_FEATURES };

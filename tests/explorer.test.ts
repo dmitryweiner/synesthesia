@@ -130,3 +130,56 @@ describe('Explorer', () => {
     }
   });
 });
+
+describe('Explorer: propose-then-commit (used by the scout)', () => {
+  it('proposeLike/proposeDislike do not change explorer state', () => {
+    const ex = new Explorer(start(), { rng: mulberry32(10) });
+    ex.like();
+    const snapshot = { current: [...ex.current], anchor: [...ex.anchor], sigma: ex.sigma, depth: ex.undoDepth, version: ex.version };
+    ex.proposeLike();
+    ex.proposeDislike();
+    expect(ex.current).toEqual(snapshot.current);
+    expect(ex.anchor).toEqual(snapshot.anchor);
+    expect(ex.sigma).toBe(snapshot.sigma);
+    expect(ex.undoDepth).toBe(snapshot.depth);
+    expect(ex.version).toBe(snapshot.version);
+  });
+
+  it('like(p) commits exactly p with the same bookkeeping as like()', () => {
+    const a = new Explorer(start(), { rng: mulberry32(11) });
+    a.like();
+    const p = a.proposeLike();
+    const liked = a.current;
+    const s0 = a.sigma;
+    const got = a.like(p);
+    expect(got).toEqual(p);
+    expect(a.current).toEqual(p);
+    expect(a.anchor).toEqual(liked);
+    expect(a.sigma).toBeLessThan(s0);
+    expect(a.lastAction).toBe('like');
+  });
+
+  it('dislike(p) commits exactly p; proposals avoid the rejected dims', () => {
+    for (let seed = 0; seed < 10; seed++) {
+      const ex = new Explorer(start(), { rng: mulberry32(300 + seed) });
+      const anchor = ex.current;
+      const rejected = ex.like();
+      const rejectedDims = new Set(contDiff(anchor, rejected));
+      const p = ex.proposeDislike();
+      for (const i of contDiff(anchor, p)) expect(rejectedDims.has(i)).toBe(false);
+      expect(ex.dislike(p)).toEqual(p);
+      expect(ex.anchor).toEqual(anchor);
+    }
+  });
+
+  it('version bumps on every state change', () => {
+    const ex = new Explorer(start(), { rng: mulberry32(12) });
+    const seen = new Set([ex.version]);
+    ex.like(); seen.add(ex.version);
+    ex.dislike(); seen.add(ex.version);
+    ex.surprise(start()); seen.add(ex.version);
+    ex.undo(); seen.add(ex.version);
+    ex.load(start()); seen.add(ex.version);
+    expect(seen.size).toBe(6);
+  });
+});

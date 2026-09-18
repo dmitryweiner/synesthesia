@@ -173,3 +173,55 @@ describe('diffSummary', () => {
     expect(d.find((x) => x.id === 'v.flow.on')?.dir).toBe('off');
   });
 });
+
+describe('lerpGenome: gate-aware fades', () => {
+  const ON = GENE_INDEX.get('a.rain.enabled')!;
+  const GAIN = GENE_INDEX.get('a.rain.gain')!;
+  const PITCH = GENE_INDEX.get('a.rain.rainPitch')!;
+
+  it('a formula switching ON fades its gain in from 0 (gate opens at t>0)', () => {
+    const a = base();
+    const b = [...a];
+    a[GAIN] = 0.6; // stale value left in the disabled formula
+    b[ON] = 1;
+    b[GAIN] = 0.4;
+    const mid = lerpGenome(a, b, 0.5);
+    expect(mid[ON]).toBe(1);
+    expect(mid[GAIN]).toBeCloseTo(0.2, 12); // halfway from neutral 0, not from the stale 0.6
+    expect(lerpGenome(a, b, 1)).toEqual(b);
+  });
+
+  it('a formula switching OFF fades its gain out and closes the gate only at t=1', () => {
+    const a = base();
+    const FM_ON = GENE_INDEX.get('a.fm.enabled')!;
+    const FM_GAIN = GENE_INDEX.get('a.fm.gain')!;
+    const b = [...a];
+    b[FM_ON] = 0;
+    const mid = lerpGenome(a, b, 0.5);
+    expect(mid[FM_ON]).toBe(1);
+    expect(mid[FM_GAIN]).toBeCloseTo(a[FM_GAIN] / 2, 12);
+    expect(lerpGenome(a, b, 0.999)[FM_ON]).toBe(1);
+    expect(lerpGenome(a, b, 1)[FM_ON]).toBe(0);
+  });
+
+  it('a route switching off fades its depth to 0 (normalized 0.5)', () => {
+    const a = base();
+    const on = GENE_INDEX.get('route.0.on')!;
+    const depth = GENE_INDEX.get('route.0.depth')!;
+    a[on] = 1;
+    a[depth] = 0.9;
+    const b = [...a];
+    b[on] = 0;
+    const mid = lerpGenome(a, b, 0.5);
+    expect(mid[on]).toBe(1);
+    expect(mid[depth]).toBeCloseTo(0.7, 12);
+  });
+
+  it('gated genes without a neutral value just switch/interpolate as before', () => {
+    const a = base();
+    const b = [...a];
+    b[ON] = 1;
+    b[PITCH] = a[PITCH] + 0.2;
+    expect(lerpGenome(a, b, 0.5)[PITCH]).toBeCloseTo(a[PITCH] + 0.1, 12);
+  });
+});

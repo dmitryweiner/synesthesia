@@ -20,6 +20,13 @@ export interface GeneDef {
   step?: number;
   exp?: boolean;
   activeIf?: string;
+  /**
+   * Normalized value at which this gene has no effect (a gain of 0, a route
+   * depth of 0, a dry mix). Morphs fade gated genes from/to it when their
+   * gate opens/closes, so formulas, routes and FX fade in and out instead
+   * of jumping (see lerpGenome).
+   */
+  neutral?: number;
 }
 
 export interface ModTarget {
@@ -32,6 +39,24 @@ export interface ModTarget {
 export const ROUTE_SLOTS = 12;
 export const LFO_SHAPES = ['sine', 'triangle', 'saw', 'square', 'random'] as const;
 export const LFO_RATE_RANGE: readonly [number, number] = [0.003, 2];
+
+// Real-unit values with no audible/visible effect, per gated param key.
+// Converted to normalized form with geneFromValue when genes are built.
+const NEUTRAL_REAL: Readonly<Record<string, number>> = {
+  // formulas
+  gain: 0,
+  // FX (only wet mixes — a filter or limiter can't be faded that way)
+  chorusMix: 0, delayMix: 0, reverbMix: 0, phaserMix: 0,
+  // visual cards
+  feedVarAmount: 0, killVarAmount: 0,
+  curlStrength: 0, advectAmount: 0, driftX: 0, driftY: 0,
+};
+
+function withNeutral(g: GeneDef, key: string): GeneDef {
+  const real = NEUTRAL_REAL[key];
+  if (real === undefined || !g.activeIf) return g;
+  return { ...g, neutral: geneFromValue(g, real) };
+}
 
 const FX_ON_LABELS: Record<(typeof FX_ON_KEYS)[number], string> = {
   filterOn: 'Filter', chorusOn: 'Chorus', reverbOn: 'Reverb', limiterOn: 'Limiter', delayOn: 'Delay', phaserOn: 'Phaser',
@@ -62,20 +87,20 @@ function buildGenes(): GeneDef[] {
     const enabled = `${group}.enabled`;
     genes.push({ id: enabled, label: f.title, kind: 'bool', group, min: 0, max: 1 });
     for (const s of f.sliders) {
-      genes.push({
+      genes.push(withNeutral({
         id: `${group}.${s.k}`, label: `${f.title} · ${s.name}`, kind: 'cont', group,
         min: s.min, max: s.max, step: s.step, exp: s.exp, activeIf: enabled,
-      });
+      }, s.k));
     }
   }
 
   for (const on of FX_ON_KEYS) genes.push({ id: `fx.${on}`, label: FX_ON_LABELS[on], kind: 'bool', group: 'fx', min: 0, max: 1 });
   for (const p of FX_MOD_PARAMS) {
     const [min, max] = FX_PARAM_RANGES[p];
-    genes.push({
+    genes.push(withNeutral({
       id: `fx.${p}`, label: FX_PARAM_LABELS[p], kind: 'cont', group: 'fx', min, max,
       exp: FX_EXP_PARAMS.has(p), activeIf: `fx.${FX_PARAM_MODULE[p]}`,
-    });
+    }, p));
   }
   genes.push({ id: 'fx.reverbDecay', label: 'Reverb decay', kind: 'cont', group: 'fx', min: REVERB_DECAY_RANGE[0], max: REVERB_DECAY_RANGE[1], activeIf: 'fx.reverbOn' });
   genes.push({ id: 'fx.filterType', label: 'Filter type', kind: 'choice', group: 'fx', min: 0, max: FILTER_TYPES.length - 1, activeIf: 'fx.filterOn' });
@@ -91,10 +116,10 @@ function buildGenes(): GeneDef[] {
       genes.push({ id: `${group}.${s.k}`, label: `${c.title} · ${s.name}`, kind: 'choice', group, min: 0, max: s.options.length - 1, activeIf: onId });
     }
     for (const s of c.sliders) {
-      genes.push({
+      genes.push(withNeutral({
         id: `${group}.${s.k}`, label: `${c.title} · ${s.name}`, kind: 'cont', group,
         min: s.min, max: s.max, step: s.step, exp: s.exp, activeIf: onId,
-      });
+      }, s.k));
     }
   }
 
@@ -111,7 +136,7 @@ function buildGenes(): GeneDef[] {
     genes.push({ id: on, label: `Route ${i + 1}`, kind: 'bool', group, min: 0, max: 1 });
     genes.push({ id: `${group}.src`, label: `Route ${i + 1} LFO`, kind: 'choice', group, min: 0, max: LFO_COUNT - 1, activeIf: on });
     genes.push({ id: `${group}.target`, label: `Route ${i + 1} target`, kind: 'choice', group, min: 0, max: MOD_TARGETS.length - 1, activeIf: on });
-    genes.push({ id: `${group}.depth`, label: `Route ${i + 1} depth`, kind: 'cont', group, min: -1, max: 1, activeIf: on });
+    genes.push({ id: `${group}.depth`, label: `Route ${i + 1} depth`, kind: 'cont', group, min: -1, max: 1, activeIf: on, neutral: 0.5 });
     genes.push({ id: `${group}.exp`, label: `Route ${i + 1} exp`, kind: 'bool', group, min: 0, max: 1, activeIf: on });
   }
 

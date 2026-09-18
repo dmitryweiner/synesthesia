@@ -1,6 +1,9 @@
 // Audio engine: AudioContext, worklet generators, FX chain, analyser. No DOM
 // — takes ready state (schema/audio.ts), the app calls methods. Ported from
 // formula-synth (recorder dropped; the analyser feeds src/audio/features.ts).
+// The same graph can also be rendered faster than real time into an
+// OfflineAudioContext (renderOffline) — scripts/analyze.mjs measures the
+// app's actual sound, FX and LFOs included, that way.
 import workletUrl from '../worklet/processors.ts?worker&url';
 import { FORMULAS } from '../schema/audio';
 import type { FxState } from '../schema/audio';
@@ -32,7 +35,7 @@ const PARAM_SMOOTH = 0.05;     // s — gain changes during morphs
 const FX_MOD_INTERVAL_MS = 25; // ~40 Hz control rate for LFO → FX
 const FX_SMOOTH_TC = 0.03;     // s — smoothing of modulated FX params
 
-function makeImpulseResponse(ctx: AudioContext, seconds: number, decay: number): AudioBuffer {
+function makeImpulseResponse(ctx: BaseAudioContext, seconds: number, decay: number): AudioBuffer {
   const sr = ctx.sampleRate;
   const len = Math.max(1, Math.floor(sr * seconds));
   const buf = ctx.createBuffer(2, len, sr);
@@ -48,7 +51,8 @@ function makeImpulseResponse(ctx: AudioContext, seconds: number, decay: number):
 }
 
 export class AudioEngine {
-  private ctx: AudioContext | null = null;
+  private ctx: BaseAudioContext | null = null;
+  private offline = false;
   private analyserNode: AnalyserNode | null = null;
 
   private mixBus!: GainNode;
@@ -125,7 +129,7 @@ export class AudioEngine {
   }
 
   async resume(): Promise<void> {
-    if (this.ctx && this.ctx.state === 'suspended') await this.ctx.resume();
+    if (this.ctx instanceof AudioContext && this.ctx.state === 'suspended') await this.ctx.resume();
   }
 
   async start(state: EngineState): Promise<void> {
@@ -134,6 +138,31 @@ export class AudioEngine {
     const ctx = new AudioContext({ latencyHint: 'interactive' });
     if (ctx.state === 'suspended') await ctx.resume();
     await ctx.audioWorklet.addModule(workletUrl);
+    this.build(ctx, state);
+  }
+
+  /**
+   * Renders `seconds` of the given state offline (mono) — the exact live
+   * graph, with FX modulation scheduled ahead as automation instead of the
+   * live control-rate timer.
+   */
+  static async renderOffline(state: EngineState, seconds: number, sampleRate = 44100): Promise<Float32Array> {
+    const ctx = new OfflineAudioContext(1, Math.max(1, Math.round(seconds * sampleRate)), sampleRate);
+    await ctx.audioWorklet.addModule(workletUrl);
+    const eng = new AudioEngine();
+    eng.offline = true;
+    eng.build(ctx, state);
+    const routes = eng.fxRoutes();
+    if (routes.length > 0 && eng.baseFx && eng.modState) {
+      for (let t = 0; t < seconds; t += FX_MOD_INTERVAL_MS / 1000) {
+        eng.applyFxParams(modulateFx(eng.baseFx, routes, eng.modState.lfos, t), t);
+      }
+    }
+    const buf = await ctx.startRendering();
+    return buf.getChannelData(0);
+  }
+
+  private build(ctx: BaseAudioContext, state: EngineState): void {
     this.ctx = ctx;
 
     this.analyserNode = ctx.createAnalyser();
@@ -251,7 +280,7 @@ export class AudioEngine {
     await new Promise((r) => setTimeout(r, 80));
     try { this.chorusLFO.stop(); } catch { /* already stopped */ }
     try { this.phaserLFO.stop(); } catch { /* already stopped */ }
-    await ctx.close();
+    if (ctx instanceof AudioContext) await ctx.close();
     this.ctx = null;
     this.analyserNode = null;
     this.nodes.clear();
@@ -288,6 +317,10 @@ export class AudioEngine {
 
   private updateFxMod(): void {
     if (!this.ctx || !this.baseFx) return;
+    if (this.offline) {
+      this.applyFxParams(this.baseFx, 0); // renderOffline schedules the modulation itself
+      return;
+    }
     if (this.fxRoutes().length > 0) {
       if (this.fxModTimer === null) {
         this.fxModTimer = setInterval(() => this.tickFxMod(), FX_MOD_INTERVAL_MS);
@@ -423,10 +456,11 @@ export class AudioEngine {
     this.master.connect(this.analyserNode);
   }
 
-  applyFxParams(fx: FxState): void {
+  /** Applies FX params at `when` (context time; default now). */
+  applyFxParams(fx: FxState, when?: number): void {
     const ctx = this.ctx;
     if (!ctx) return;
-    const now = ctx.currentTime;
+    const now = when ?? ctx.currentTime;
 
     // Values arrive at control rate during modulation AND during genome
     // morphs, so always smooth: setValueAtTime would zipper/click, which the

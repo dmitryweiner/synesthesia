@@ -16,9 +16,13 @@ export function parseFlags(argv, valueFlags, repeatable = []) {
   return { flags, lists };
 }
 
-/** Reuses a running dev (:5173) / preview (:4173) server or spawns one. */
+/**
+ * Reuses a running dev (:5173) / preview (:4173) server or spawns one.
+ * SYN_PORT overrides the port — e.g. to run a long analysis against a
+ * snapshot copy of the project while the working tree keeps changing.
+ */
 export async function ensureServer(preview) {
-  const PORT = preview ? 4173 : 5173;
+  const PORT = Number(process.env.SYN_PORT) || (preview ? 4173 : 5173);
   const BASE = `http://localhost:${PORT}`;
   const up = async () => { try { return (await fetch(BASE)).ok; } catch { return false; } };
   let proc = null;

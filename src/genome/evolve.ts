@@ -245,12 +245,34 @@ export function randomGenome(rng: Rng): Genome {
   return repair(g, rng);
 }
 
-/** Continuous genes interpolate; discrete genes switch as soon as t > 0. */
+const GATE_IDX: readonly number[] = GENES.map((g) => (g.activeIf ? geneIndex(g.activeIf) : -1));
+const IS_GATE: readonly boolean[] = GENES.map((_, i) => GATE_IDX.includes(i));
+
+/**
+ * Morph position between two genomes. Continuous genes interpolate;
+ * discrete genes switch as soon as t > 0 — except gates closing (1 → 0),
+ * which stay open until t = 1 so their gated genes can fade to `neutral`.
+ * Likewise a gate opening fades its neutral-capable genes in from neutral
+ * (a formula enters at gain 0, not at whatever stale gain it had).
+ */
 export function lerpGenome(a: Genome, b: Genome, t: number): Genome {
+  if (t >= 1) return [...b];
   const out = new Array(a.length);
   for (let i = 0; i < a.length; i++) {
-    if (GENES[i].kind === 'cont') out[i] = t >= 1 ? b[i] : a[i] + (b[i] - a[i]) * t;
-    else out[i] = t > 0 ? b[i] : a[i];
+    const d = GENES[i];
+    if (d.kind !== 'cont') {
+      const closing = IS_GATE[i] && a[i] === 1 && b[i] === 0;
+      out[i] = t > 0 && !closing ? b[i] : a[i];
+      continue;
+    }
+    let from = a[i];
+    let to = b[i];
+    const gi = GATE_IDX[i];
+    if (gi >= 0 && d.neutral !== undefined) {
+      if (a[gi] === 0 && b[gi] === 1) from = d.neutral;
+      else if (a[gi] === 1 && b[gi] === 0) to = d.neutral;
+    }
+    out[i] = from + (to - from) * t;
   }
   return out;
 }

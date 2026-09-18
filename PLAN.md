@@ -48,9 +48,28 @@ starting points of every exploration.
 5. **Commits are allowed** without asking (per the brief), at milestone
    granularity.
 6. **Audio-analysis scripts** mentioned in the brief were not found in either
-   sibling repo (only `rec.mjs` with peak/RMS/click metrics). A new
-   `scripts/analyze.mjs` + pure `src/analysis/` module (spectral slope,
-   Higuchi fractal dimension of the envelope) is written here instead.
+   sibling repo (only `rec.mjs` with peak/RMS/click metrics). Written here
+   instead: pure `src/analysis/fractal.ts` (β of the 1/f^β spectrum of the
+   loudness and spectral-centroid contours, Higuchi dimension, box-counting
+   dimension of the spectrogram → `fractalScore` in [0,1]) and
+   `scripts/analyze.mjs`, which renders the app's real graph (worklets + FX +
+   LFOs) through an OfflineAudioContext in headless Chromium. First run
+   (30 s, 22 kHz): built-in presets 0.785 ± 0.14 vs random points
+   0.552 ± 0.31; "Fractal garden" (hand-tuned for waterfall fractality in
+   formula-synth) scores highest, 0.97. 👍/👎 proposals spread 0.34–0.98 and
+   some drop 15–25 dB in loudness.
+7. **Scout — fractality-guided proposals, ON by default** (agreed with the
+   user, 2026-09-18). While sound is playing and the point has settled, the
+   app renders the current point and 3 👍 + 3 👎 candidates offline (~8 s
+   each, same graph), scores them and, on a press, commits the best-scored
+   ready candidate (fractal score minus a penalty for being much quieter than
+   the current point). Nothing ready → the usual instant proposal. Costs
+   background CPU (offline rendering thread); `?scout=0` disables it.
+   *Render window chosen by measurement* (`analyze.mjs --configs`, 5 presets
+   × 4 proposals, Spearman ρ against a 30 s @ 22 kHz render): 8 s @ 16 kHz
+   ρ = 0.23 (useless — slow LFOs don't fit), 16 s @ 11 kHz ρ = 0.63,
+   **24 s @ 8 kHz ρ = 0.73** at about the same render cost (~2.4 s per
+   candidate on the aarch64 dev box) → the scout uses 24 s @ 8 kHz.
 
 ## Architecture
 
@@ -101,11 +120,19 @@ collide across the three namespaces.
 ## Phases
 
 0. Scaffold (package.json, tsconfig, eslint, vite, PLAN.md) ✔
-1. Pure DSP + audio engine port (tests: generator sanity, gate, mod,
-   filters, modrouting, features)
-2. WebGL sim port (tests: params, palette)
-3. Schemas + state + share + user presets (tests)
-4. Genome codec + evolve + explorer (tests)
-5. Combined presets (tests: every preset round-trips, sounds, stays in range)
-6. Coupling + main.ts UI + smoke script
-7. Analysis module + script, README, CLAUDE.md, build to docs, commit
+1. Pure DSP + audio engine port (generator sanity, gate, mod, filters,
+   modrouting, features) ✔
+2. WebGL sim port (params, palette; aspect-correct grid) ✔
+3. Schemas + state + share + user presets ✔
+4. Genome codec + evolve + explorer (+ gate-aware morph fades) ✔
+5. Combined presets (every preset round-trips, sounds, stays in range) ✔
+6. Coupling + main.ts UI + smoke/snap scripts ✔
+7. Fractality analysis module + analyze script + scout ✔
+8. README, CLAUDE.md, build to docs ✔
+
+## Backlog / ideas
+
+- Fade discrete FX (filter on/off, type changes) with a crossfade instead
+  of a switch at the start of the morph.
+- Let the scout's window adapt to the device (render speed probe).
+- A tiny live "fractality" meter from the analyser (rolling 30 s window).

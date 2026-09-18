@@ -49,12 +49,23 @@ await page.locator('#audioBtn').click();
 await page.waitForTimeout(1500);
 check(((await page.locator('#audioBtn').textContent()) ?? '').includes('⏹'), 'audio did not start');
 
+// --- scout: with sound on, 3 👍 + 3 👎 candidates get rendered offline and
+// scored; the next 👍 must commit the best of them ---
+ctxLabel = 'scout';
+const scouted = await page.waitForSelector('body[data-scout="3/3"]', { timeout: 180000 }).then(() => true).catch(() => false);
+check(scouted, `scout did not finish (data-scout=${await page.evaluate(() => document.body.dataset.scout)})`);
+await page.locator('#detailsBtn').click();
+await page.waitForTimeout(200);
+check(((await page.locator('#details').textContent()) ?? '').includes('Fractality'), 'details lack the fractality section');
+await page.locator('#detailsBtn').click();
+
 // --- feedback loop ---
 ctxLabel = 'like';
 const hash0 = await hashOf();
 await page.locator('#likeBtn').click();
 await page.waitForTimeout(300);
 check((await statusText()).includes('continuing'), 'like status missing');
+if (scouted) check((await statusText()).includes('scouted: best of 3'), `like did not use the scout: "${await statusText()}"`);
 await page.waitForTimeout(MORPH_WAIT);
 check((await hashOf()) !== hash0, 'hash unchanged after like');
 check(!(await page.locator('#undoBtn').isDisabled()), 'undo should be enabled after like');
@@ -161,8 +172,13 @@ if (clip.includes('#s=')) {
   await page2.locator('#detailsBtn').click();
   await page.locator('#detailsBtn').click();
   await page.waitForTimeout(200);
-  const a = await page.locator('#details').evaluate((n) => n.textContent);
-  const b = await page2.locator('#details').evaluate((n) => n.textContent);
+  // Compare everything but the Fractality section (only present where the
+  // scout ran, i.e. with sound on).
+  const pointText = (n) => [...n.querySelectorAll('h3')]
+    .filter((h) => !(h.textContent ?? '').startsWith('Fractality'))
+    .map((h) => `${h.textContent}:${h.nextElementSibling?.textContent ?? ''}`).join('|');
+  const a = await page.locator('#details').evaluate(pointText);
+  const b = await page2.locator('#details').evaluate(pointText);
   check(a === b, 'shared point differs from the original');
   await page.locator('#detailsBtn').click();
   await page2.close();

@@ -6,6 +6,11 @@
 //   surprise — jump near a given genome (a random preset), reset the search;
 //   undo     — pop the last change (bounded history).
 // Pure bookkeeping over genome/evolve.ts; the rng is injected.
+// proposeLike/proposeDislike preview what a press would produce without
+// committing (the scout scores several of them in the background), and
+// like(p)/dislike(p) then commit a chosen proposal with the usual
+// bookkeeping. `version` bumps on every committed change so stale previews
+// can be detected.
 import type { Rng } from '../dsp/rng';
 import { GENES } from './genes';
 import type { Genome } from './codec';
@@ -36,8 +41,8 @@ export class Explorer {
   anchor: Genome;
   sigma: number;
   lastAction: ExplorerAction = 'load';
+  version = 0;
 
-  private momentum: Genome | null = null;
   private history: Genome[] = [];
   private readonly rng: Rng;
   private readonly sigma0: number;
@@ -71,40 +76,63 @@ export class Explorer {
     if (this.history.length > this.historyDepth) this.history.shift();
   }
 
-  /** "Keep going this way": anchor here, continue along the last step. */
-  like(): Genome {
-    const prevAnchor = this.anchor;
-    this.anchor = [...this.current];
+  /** What a like would set: anchor = here, momentum = the step that led here, smaller spread. */
+  private nextLike(): { momentum: Genome | null; sigma: number } {
     const delta = new Array<number>(this.current.length).fill(0);
     let any = false;
-    for (const i of diffDims(prevAnchor, this.current)) {
+    for (const i of diffDims(this.anchor, this.current)) {
       if (GENES[i].kind !== 'cont') continue;
-      delta[i] = Math.max(-MOMENTUM_CAP, Math.min(MOMENTUM_CAP, this.current[i] - prevAnchor[i]));
+      delta[i] = Math.max(-MOMENTUM_CAP, Math.min(MOMENTUM_CAP, this.current[i] - this.anchor[i]));
       any = true;
     }
-    this.momentum = any ? delta : null;
-    this.sigma = Math.max(this.sigmaMin, this.sigma * SIGMA_SHRINK);
+    return { momentum: any ? delta : null, sigma: Math.max(this.sigmaMin, this.sigma * SIGMA_SHRINK) };
+  }
+
+  /** What a dislike would set: the rejected step's dims to avoid, a larger spread. */
+  private nextDislike(): { rejected: Set<number>; sigma: number } {
+    const rejected = new Set(diffDims(this.anchor, this.current).filter((i) => GENES[i].kind === 'cont'));
+    return { rejected, sigma: Math.min(this.sigmaMax, this.sigma * SIGMA_GROW) };
+  }
+
+  /** A candidate for "more of this" — doesn't change the explorer. */
+  proposeLike(): Genome {
+    const n = this.nextLike();
+    return repair(mutate(this.current, this.rng, {
+      sigma: n.sigma, k: this.k, structuralProb: LIKE_STRUCTURAL,
+      momentum: n.momentum, momentumWeight: MOMENTUM_WEIGHT,
+    }), this.rng);
+  }
+
+  /** A candidate for "not this" — doesn't change the explorer. */
+  proposeDislike(): Genome {
+    const n = this.nextDislike();
+    return repair(mutate(this.anchor, this.rng, {
+      sigma: n.sigma, k: this.k, structuralProb: DISLIKE_STRUCTURAL, avoid: n.rejected,
+    }), this.rng);
+  }
+
+  /** "Keep going this way": anchor here, continue along the last step (or commit `proposal`). */
+  like(proposal?: Genome): Genome {
+    const next = proposal ?? this.proposeLike();
+    const n = this.nextLike();
     this.push();
-    const next = mutate(this.current, this.rng, {
-      sigma: this.sigma, k: this.k, structuralProb: LIKE_STRUCTURAL,
-      momentum: this.momentum, momentumWeight: MOMENTUM_WEIGHT,
-    });
-    this.current = repair(next, this.rng);
+    this.anchor = [...this.current];
+    this.sigma = n.sigma;
+    this.current = [...next];
     this.lastAction = 'like';
+    this.version++;
     return this.current;
   }
 
-  /** "Go back and try elsewhere": from the anchor, avoiding the rejected dims. */
-  dislike(): Genome {
-    const rejected = new Set(diffDims(this.anchor, this.current).filter((i) => GENES[i].kind === 'cont'));
-    this.momentum = null;
-    this.sigma = Math.min(this.sigmaMax, this.sigma * SIGMA_GROW);
+  /** "Go back and try elsewhere": from the anchor, avoiding the rejected dims (or commit `proposal`). */
+  dislike(proposal?: Genome): Genome {
+    const next = proposal ?? this.proposeDislike();
+    const n = this.nextDislike();
+    this.sigma = n.sigma;
     this.push();
-    const next = mutate(this.anchor, this.rng, {
-      sigma: this.sigma, k: this.k, structuralProb: DISLIKE_STRUCTURAL, avoid: rejected,
-    });
-    this.current = repair(next, this.rng);
+    this.current = [...next];
     this.lastAction = 'dislike';
+    this.version++;
     return this.current;
   }
 
@@ -114,9 +142,9 @@ export class Explorer {
     const next = mutate(target, this.rng, { sigma: SURPRISE_SIGMA, k: 4, structuralProb: 0 });
     this.current = repair(next, this.rng);
     this.anchor = [...this.current];
-    this.momentum = null;
     this.sigma = this.sigma0;
     this.lastAction = 'surprise';
+    this.version++;
     return this.current;
   }
 
@@ -124,10 +152,10 @@ export class Explorer {
   load(g: Genome): void {
     this.current = [...g];
     this.anchor = [...g];
-    this.momentum = null;
     this.sigma = this.sigma0;
     this.history = [];
     this.lastAction = 'load';
+    this.version++;
   }
 
   /** Reverts the last change; null when there's nothing to undo. */
@@ -136,8 +164,8 @@ export class Explorer {
     if (!prev) return null;
     this.current = prev;
     this.anchor = [...prev];
-    this.momentum = null;
     this.lastAction = 'undo';
+    this.version++;
     return this.current;
   }
 }
