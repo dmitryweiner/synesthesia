@@ -8,13 +8,14 @@ import { renderDetails } from './ui/details';
 import { SimEngine } from './sim/engine';
 import { gridSize } from './sim/grid';
 import { AudioEngine } from './audio/engine';
-import { FeatureTracker, SILENT_FEATURES } from './audio/features';
+import { FeatureTracker, OnsetDetector, SILENT_FEATURES } from './audio/features';
 import type { AudioFeatures } from './audio/features';
 import { effectiveParams } from './dsp/mod';
 import { CARDS, cardSliderRanges } from './schema/visual';
 import { fieldVariationParamsFromCard, flowParamsFromCard, reactionParamsFromCard, ZERO_FIELD_VARIATION, ZERO_FLOW } from './sim/params';
 import { composePalette, palettesByIndex } from './palette';
 import { applyCoupling } from './coupling';
+import { RippleSet, displayCoupling } from './visualFx';
 import type { AppState } from './state/schema';
 import { cloneAppState, stateToAppState } from './state/schema';
 import { decodeStateToken, encodeStateToken, tokenFromHash } from './state/share';
@@ -127,6 +128,15 @@ function boot(): void {
 
   const audio = new AudioEngine();
   let features: AudioFeatures = { ...SILENT_FEATURES };
+  const onsets = new OnsetDetector();
+  const ripples = new RippleSet();
+  let lastFrame = 0;
+  // Observable effect stats for scripts/smoke.mjs (body[data-fx-hits],
+  // body[data-fx-exposure] = "min-max" over the last ~2 s).
+  let fxHits = 0;
+  let expoMin = 1;
+  let expoMax = 1;
+  let expoWindowStart = 0;
   let tracker: FeatureTracker | null = null;
   let timeDomain = new Float32Array(0);
   let freqBins = new Uint8Array(0);
@@ -361,7 +371,13 @@ function boot(): void {
     morphTo = explorer.current;
     live = explorer.current;
     morphDone = true;
-    applyToEngines(decodeGenome(explorer.current), true);
+    // A hard switch, not a morph: the engine ducks, rebuilds its FX (no tails
+    // of the previous point) and fades the new one in — see switchTo().
+    state = decodeGenome(explorer.current);
+    if (audio.running) {
+      lastAudioPush = lfoTime();
+      void audio.switchTo({ masterGain, fx: state.audio.fx, formulas: state.audio.formulas, mod: state.mod });
+    }
     sim.reseed();
     refreshUndo();
     setStatus(`${label}: ${s.presetName ?? 'unnamed point'}`);
@@ -498,14 +514,39 @@ function boot(): void {
     return out;
   }
 
+  // Onset hit → fresh growth at a random spot + a ripple from it
+  // (onsetToSeed, PLAN.md decision 8).
+  function seedOnHit(now: number): void {
+    const amount = state.coupling.onsetToSeed;
+    if (amount < 0.02) return;
+    const x = 0.08 + Math.random() * 0.84;
+    const y = 0.08 + Math.random() * 0.84;
+    sim.inject([x, y], 0.015 + 0.035 * amount, Math.min(1, 0.4 + amount));
+    ripples.add(x, y, amount, now);
+    document.body.dataset.fxHits = String(++fxHits);
+  }
+
+  function trackExposure(exposure: number, now: number): void {
+    expoMin = Math.min(expoMin, exposure);
+    expoMax = Math.max(expoMax, exposure);
+    if (now - expoWindowStart < 2) return;
+    document.body.dataset.fxExposure = `${expoMin.toFixed(2)}-${expoMax.toFixed(2)}`;
+    expoMin = expoMax = exposure;
+    expoWindowStart = now;
+  }
+
   function loop(): void {
     tickMorph();
+    const now = performance.now() / 1000;
+    const dt = lastFrame > 0 ? Math.min(0.25, now - lastFrame) : 1 / 60;
+    lastFrame = now;
 
     const analyser = audio.analyser;
     if (analyser && tracker) {
       analyser.getFloatTimeDomainData(timeDomain);
       analyser.getByteFrequencyData(freqBins);
-      features = tracker.update(timeDomain, freqBins);
+      features = tracker.update(timeDomain, freqBins, dt);
+      if (onsets.update(features.onset, now)) seedOnHit(now);
     }
 
     const t = lfoTime();
@@ -515,7 +556,13 @@ function boot(): void {
     sim.flow = state.visual.cards.flow.on ? flowParamsFromCard(eff.flow) : { ...ZERO_FLOW };
     const pal = eff.palette;
     sim.step();
-    sim.render(composePalette(palettesByIndex(pal.paletteId), pal.shift, pal.contrast, pal.bands, pal.relief, pal.lightAngle, pal.gloss));
+    const fx = displayCoupling(features, state.coupling);
+    trackExposure(fx.exposure, now);
+    sim.render(
+      composePalette(palettesByIndex(pal.paletteId), pal.shift, pal.contrast, pal.bands, pal.relief, pal.lightAngle, pal.gloss),
+      fx,
+      ripples.pack(now),
+    );
     requestAnimationFrame(loop);
   }
 

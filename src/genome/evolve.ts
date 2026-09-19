@@ -3,7 +3,7 @@
 import type { Rng } from '../dsp/rng';
 import { gaussian } from '../dsp/rng';
 import { FORMULAS, MAX_ENABLED_FORMULAS } from '../schema/audio';
-import { LFO_COUNT } from '../state/schema';
+import { COUPLING_FLOOR, EXPLICIT_COUPLING_KEYS, LFO_COUNT } from '../state/schema';
 import type { GeneDef } from './genes';
 import { GENES, GENE_INDEX, ROUTE_SLOTS, geneIndex, isGeneActive } from './genes';
 import type { Genome } from './codec';
@@ -72,9 +72,33 @@ export function isValidGenome(g: unknown): g is Genome {
   return true;
 }
 
-/** Enforces 1..MAX_ENABLED_FORMULAS enabled formulas. Returns a (possibly new) genome. */
+// Explicit couplings have range 0..1, so the normalized gene IS the value.
+const EXPLICIT_IDX: readonly number[] = EXPLICIT_COUPLING_KEYS.map((k) => geneIndex(`c.${k}`));
+
+/** Scales the explicit sound→image couplings up (proportionally) until they sum to ≥ COUPLING_FLOOR. */
+function liftCouplingFloor(g: Genome): void {
+  for (let pass = 0; pass < 4; pass++) {
+    const sum = EXPLICIT_IDX.reduce((a, i) => a + g[i], 0);
+    if (sum >= COUPLING_FLOOR - 1e-12) return;
+    if (sum <= 1e-9) {
+      for (const i of EXPLICIT_IDX) g[i] = COUPLING_FLOOR / EXPLICIT_IDX.length;
+      return;
+    }
+    // genes already at 1 can't grow; spread the rest over the others
+    const free = EXPLICIT_IDX.filter((i) => g[i] < 1);
+    const freeSum = free.reduce((a, i) => a + g[i], 0);
+    const need = COUPLING_FLOOR - sum;
+    for (const i of free) g[i] = clamp01(freeSum > 0 ? g[i] * (1 + need / freeSum) : g[i] + need / free.length);
+  }
+}
+
+/**
+ * Enforces 1..MAX_ENABLED_FORMULAS enabled formulas and the sound→image
+ * coupling floor. Returns a (possibly new) genome.
+ */
 export function repair(g: Genome, rng: Rng): Genome {
   const out = [...g];
+  liftCouplingFloor(out);
   const on = FORMULA_ENABLED_IDX.filter((i) => out[i] === 1);
   if (on.length === 0) {
     out[pick(rng, FORMULA_ENABLED_IDX)] = 1;

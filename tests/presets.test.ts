@@ -2,7 +2,7 @@
 // sanitize/clamp round trip unchanged, round-trips through the genome,
 // actually makes sound, and links sound to image (routes or coupling).
 import { PRESETS, DEFAULT_PRESET_INDEX } from '../src/presets';
-import { sanitizeState, stateToAppState, COUPLING_KEYS, isModTarget } from '../src/state/schema';
+import { sanitizeState, stateToAppState, COUPLING_KEYS, EXPLICIT_COUPLING_KEYS, COUPLING_FLOOR, isModTarget } from '../src/state/schema';
 import { encodeGenome, decodeGenome } from '../src/genome/codec';
 import { GENES, ROUTE_SLOTS } from '../src/genome/genes';
 import { enabledFormulaCount, isValidGenome } from '../src/genome/evolve';
@@ -59,6 +59,11 @@ describe.each(PRESETS.map((p) => [p.name, p] as const))('preset %s', (_name, pre
     const visualRoute = s.mod.routes.some((r) => CARDS.some((c) => c.id === r.target));
     const coupled = COUPLING_KEYS.some((k) => s.coupling[k] !== 0);
     expect(visualRoute || coupled).toBe(true);
+  });
+
+  it('explicit sound→image couplings meet the floor (pulse, flash, seeds, tint)', () => {
+    const sum = EXPLICIT_COUPLING_KEYS.reduce((a, k) => a + s.coupling[k], 0);
+    expect(sum).toBeGreaterThanOrEqual(COUPLING_FLOOR);
   });
 
   it('round-trips through the genome', () => {

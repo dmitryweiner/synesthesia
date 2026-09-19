@@ -4,6 +4,11 @@ import { encodeGenome, decodeGenome } from '../src/genome/codec';
 import { defaultAppState } from '../src/state/schema';
 import { mulberry32 } from '../src/dsp/rng';
 import { MAX_ENABLED_FORMULAS } from '../src/schema/audio';
+import { EXPLICIT_COUPLING_KEYS, COUPLING_FLOOR } from '../src/state/schema';
+
+function explicitSum(g: number[]): number {
+  return EXPLICIT_COUPLING_KEYS.reduce((a, k) => a + decodeGenome(g).coupling[k], 0);
+}
 
 function base() {
   const s = defaultAppState();
@@ -124,6 +129,25 @@ describe('repair / validity', () => {
     expect(enabledFormulaCount(repair(all, mulberry32(1)))).toBe(MAX_ENABLED_FORMULAS);
   });
 
+  it('repair lifts the explicit sound→image couplings to the floor (and leaves them alone above it)', () => {
+    const g = base();
+    for (const k of EXPLICIT_COUPLING_KEYS) g[GENE_INDEX.get(`c.${k}`)!] = 0;
+    const r = repair(g, mulberry32(9));
+    expect(explicitSum(r)).toBeGreaterThanOrEqual(COUPLING_FLOOR - 1e-9);
+    // proportions kept when scaling up a weak but non-zero mix
+    const w = base();
+    const [a, b] = EXPLICIT_COUPLING_KEYS;
+    for (const k of EXPLICIT_COUPLING_KEYS) w[GENE_INDEX.get(`c.${k}`)!] = 0;
+    w[GENE_INDEX.get(`c.${a}`)!] = 0.2;
+    w[GENE_INDEX.get(`c.${b}`)!] = 0.1;
+    const rw = repair(w, mulberry32(9));
+    expect(explicitSum(rw)).toBeGreaterThanOrEqual(COUPLING_FLOOR - 1e-9);
+    expect(rw[GENE_INDEX.get(`c.${a}`)!]).toBeGreaterThan(rw[GENE_INDEX.get(`c.${b}`)!]);
+    const strong = base();
+    for (const k of EXPLICIT_COUPLING_KEYS) strong[GENE_INDEX.get(`c.${k}`)!] = 0.9;
+    expect(repair(strong, mulberry32(9))).toEqual(strong);
+  });
+
   it('isValidGenome: length and ranges', () => {
     expect(isValidGenome(base())).toBe(true);
     expect(isValidGenome([1, 2, 3])).toBe(false);
@@ -140,6 +164,7 @@ describe('repair / validity', () => {
       expect(n).toBeGreaterThanOrEqual(1);
       expect(n).toBeLessThanOrEqual(MAX_ENABLED_FORMULAS);
       expect(() => decodeGenome(g)).not.toThrow();
+      expect(explicitSum(g)).toBeGreaterThanOrEqual(COUPLING_FLOOR - 1e-9);
     }
   });
 });

@@ -1,13 +1,15 @@
 // SimEngine: owns the GL context, the ping-pong state, and every GPU
-// program (seed/react/display/velocity/advect/paramfield). Per rendered
+// program (seed/react/display/velocity/advect/paramfield/inject). Per rendered
 // frame: recompute paramfield + velocity (cheap), run `reaction.speed`
 // Gray-Scott substeps, then one advection substep. No determinism is
 // attempted — reseed() re-rolls Math.random(). Ported from chromaflux
 // without the Veins/Pour/Brush layers.
 import { createGL2, createProgram, composeFragmentShader } from '../gl/context';
 import { PingPongTarget, SingleTarget } from '../gl/pingpong';
-import { FULLSCREEN_VERT, runPass, u1f, u1i, u2f, u2fv, u3f, utex } from '../gl/quad';
+import { FULLSCREEN_VERT, runPass, u1f, u1i, u2f, u2fv, u3f, u4fv, utex } from '../gl/quad';
 import type { PaletteUniforms } from '../palette';
+import type { DisplayFx } from '../visualFx';
+import { MAX_RIPPLES, NEUTRAL_DISPLAY } from '../visualFx';
 import type { FieldVariationParams, FlowParams, ReactionParams } from './params';
 import { DEFAULT_REACTION_PARAMS, ZERO_FIELD_VARIATION, ZERO_FLOW } from './params';
 import commonGlsl from './shaders/common.glsl?raw';
@@ -17,6 +19,7 @@ import displayFrag from './shaders/display.frag?raw';
 import velocityFrag from './shaders/velocity.frag?raw';
 import advectFrag from './shaders/advect.frag?raw';
 import paramfieldFrag from './shaders/paramfield.frag?raw';
+import injectFrag from './shaders/inject.frag?raw';
 
 const MAX_SPOTS = 24;
 const EVOLVE_DT = 1 / 60; // nominal frame time; evolveT is an aesthetic drift, not a clock
@@ -44,6 +47,8 @@ export class SimEngine {
   private readonly velocityProgram: WebGLProgram;
   private readonly advectProgram: WebGLProgram;
   private readonly paramfieldProgram: WebGLProgram;
+  private readonly injectProgram: WebGLProgram;
+  private readonly noRipples = new Float32Array(MAX_RIPPLES * 4);
 
   constructor(opts: SimEngineOptions) {
     const gl = createGL2(opts.canvas);
@@ -57,6 +62,7 @@ export class SimEngine {
     this.velocityProgram = createProgram(gl, FULLSCREEN_VERT, composeFragmentShader(commonGlsl, velocityFrag));
     this.advectProgram = createProgram(gl, FULLSCREEN_VERT, composeFragmentShader(commonGlsl, advectFrag));
     this.paramfieldProgram = createProgram(gl, FULLSCREEN_VERT, composeFragmentShader(commonGlsl, paramfieldFrag));
+    this.injectProgram = createProgram(gl, FULLSCREEN_VERT, composeFragmentShader(commonGlsl, injectFrag));
     this.reseed();
   }
 
@@ -141,8 +147,23 @@ export class SimEngine {
     this.state.swap();
   }
 
-  /** Draws the current state to the canvas (default framebuffer). */
-  render(palette: PaletteUniforms): void {
+  /** Drops fresh "ink" into a disc at uv (0..1, Y-up) — onset seeding. amount 0..1. */
+  inject(uv: readonly [number, number], radius: number, amount: number): void {
+    runPass(this.gl, this.injectProgram, {
+      uState: utex(this.state.readTexture, 0),
+      uCenter: u2f(uv[0], uv[1]),
+      uRadius: u1f(radius),
+      uAmount: u1f(amount),
+      uAspect: u1f(this.aspect),
+    }, this.state.writeTarget);
+    this.state.swap();
+  }
+
+  /**
+   * Draws the current state to the canvas (default framebuffer), with the
+   * explicit sound→image display effects and packed ripples (RippleSet.pack).
+   */
+  render(palette: PaletteUniforms, fx: Readonly<DisplayFx> = NEUTRAL_DISPLAY, ripples?: Float32Array): void {
     const texel: readonly [number, number] = [1 / this.state.width, 1 / this.state.height];
     runPass(this.gl, this.displayProgram, {
       uState: utex(this.state.readTexture, 0),
@@ -155,6 +176,11 @@ export class SimEngine {
       uRelief: u1f(palette.relief),
       uLightAngle: u1f(palette.lightAngle),
       uGloss: u1f(palette.gloss),
+      uAspect: u1f(this.aspect),
+      uExposure: u1f(fx.exposure),
+      uFlash: u1f(fx.flash),
+      uTint: u3f(fx.tint[0], fx.tint[1], fx.tint[2]),
+      uRipples: u4fv(ripples ?? this.noRipples),
     }, null);
   }
 

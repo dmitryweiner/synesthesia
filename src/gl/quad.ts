@@ -16,6 +16,7 @@ export type UniformValue =
   | { type: '3f'; value: readonly [number, number, number] }
   | { type: '1i'; value: number }
   | { type: '2fv'; value: Float32Array }
+  | { type: '4fv'; value: Float32Array }
   | { type: 'tex'; value: WebGLTexture; unit: number };
 
 export type Uniforms = Record<string, UniformValue>;
@@ -25,6 +26,7 @@ export function u2f(x: number, y: number): UniformValue { return { type: '2f', v
 export function u3f(x: number, y: number, z: number): UniformValue { return { type: '3f', value: [x, y, z] }; }
 export function u1i(value: number): UniformValue { return { type: '1i', value }; }
 export function u2fv(value: Float32Array): UniformValue { return { type: '2fv', value }; }
+export function u4fv(value: Float32Array): UniformValue { return { type: '4fv', value }; }
 export function utex(value: WebGLTexture, unit: number): UniformValue { return { type: 'tex', value, unit }; }
 
 function applyUniforms(gl: WebGL2RenderingContext, program: WebGLProgram, uniforms: Uniforms): void {
@@ -37,6 +39,7 @@ function applyUniforms(gl: WebGL2RenderingContext, program: WebGLProgram, unifor
       case '3f': gl.uniform3f(loc, u.value[0], u.value[1], u.value[2]); break;
       case '1i': gl.uniform1i(loc, u.value); break;
       case '2fv': gl.uniform2fv(loc, u.value); break;
+      case '4fv': gl.uniform4fv(loc, u.value); break;
       case 'tex':
         gl.activeTexture(gl.TEXTURE0 + u.unit);
         gl.bindTexture(gl.TEXTURE_2D, u.value);

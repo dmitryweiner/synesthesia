@@ -18,9 +18,24 @@ export const DEFAULT_MASTER_GAIN = 0.75;
 // A gentle default: slow breathing (20s cycle), silent until routed.
 export const DEFAULT_LFO: Readonly<LfoDef> = { shape: 'sine', rate: 0.05, phase: 0 };
 
-export const COUPLING_KEYS = ['loudToFlow', 'loudToCurl', 'loudToGloss', 'brightToShift', 'onsetToLight'] as const;
+// Audio → image coupling strengths (genes). The first five offset card
+// params (src/coupling.ts) and are signed; the four "explicit" ones drive
+// display-level effects and onset seeding (src/visualFx.ts, PLAN.md #8),
+// range 0..1, and must together stay ≥ COUPLING_FLOOR so evolution can't
+// mute the link (genome/evolve.ts repair()).
+export const CARD_COUPLING_KEYS = ['loudToFlow', 'loudToCurl', 'loudToGloss', 'brightToShift', 'onsetToLight'] as const;
+export const EXPLICIT_COUPLING_KEYS = ['loudToPulse', 'onsetToFlash', 'onsetToSeed', 'spectrumToTint'] as const;
+export const COUPLING_KEYS = [...CARD_COUPLING_KEYS, ...EXPLICIT_COUPLING_KEYS] as const;
+export type CardCouplingKey = (typeof CARD_COUPLING_KEYS)[number];
+export type ExplicitCouplingKey = (typeof EXPLICIT_COUPLING_KEYS)[number];
 export type CouplingKey = (typeof COUPLING_KEYS)[number];
 export type CouplingState = Record<CouplingKey, number>;
+export const COUPLING_FLOOR = 1.2;
+
+export const COUPLING_RANGES: Readonly<Record<CouplingKey, readonly [number, number]>> = {
+  loudToFlow: [-1, 1], loudToCurl: [-1, 1], loudToGloss: [-1, 1], brightToShift: [-1, 1], onsetToLight: [-1, 1],
+  loudToPulse: [0, 1], onsetToFlash: [0, 1], onsetToSeed: [0, 1], spectrumToTint: [0, 1],
+};
 
 export interface FormulaSnapshot {
   enabled: boolean;
@@ -82,8 +97,13 @@ function defaultCardState(card: CardDef): CardState {
   return { on: !DEFAULT_OFF_CARD_IDS.some((id) => id === card.id), params };
 }
 
+// Explicit couplings default above the floor, so points saved before they
+// existed (old #s= links, localStorage) also get a visible link.
 export function defaultCoupling(): CouplingState {
-  return { loudToFlow: 0, loudToCurl: 0, loudToGloss: 0, brightToShift: 0, onsetToLight: 0 };
+  return {
+    loudToFlow: 0, loudToCurl: 0, loudToGloss: 0, brightToShift: 0, onsetToLight: 0,
+    loudToPulse: 0.5, onsetToFlash: 0.5, onsetToSeed: 0.4, spectrumToTint: 0.4,
+  };
 }
 
 export function defaultAppState(): AppState {
@@ -320,7 +340,7 @@ export function stateToAppState(partial: PartialAppState): AppState {
   if (partial.coupling) {
     for (const k of COUPLING_KEYS) {
       const v = partial.coupling[k];
-      if (typeof v === 'number') state.coupling[k] = clamp(v, -1, 1);
+      if (typeof v === 'number') state.coupling[k] = clamp(v, COUPLING_RANGES[k][0], COUPLING_RANGES[k][1]);
     }
   }
   if (partial.presetName) state.presetName = partial.presetName;

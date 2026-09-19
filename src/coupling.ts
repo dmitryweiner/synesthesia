@@ -2,11 +2,11 @@
 // the coupling genes, offset visual card params every frame. Cyclic params
 // (palette phase, light angle) wrap; the rest clamp to their slider range.
 import type { AudioFeatures } from './audio/features';
-import type { CouplingKey } from './state/schema';
+import type { CardCouplingKey, CouplingKey } from './state/schema';
 import { cardDef } from './schema/visual';
 
 export interface CouplingDef {
-  key: CouplingKey;
+  key: CardCouplingKey;
   label: string;
   card: string;
   param: string;
@@ -32,7 +32,20 @@ function range(card: string, param: string): readonly [number, number] {
   return s ? [s.min, s.max] : [-Infinity, Infinity];
 }
 
-const RANGES: ReadonlyMap<CouplingKey, readonly [number, number]> = new Map(
+/** Human-readable names for every coupling gene (details panel). */
+export const COUPLING_LABELS: Readonly<Record<CouplingKey, string>> = {
+  loudToFlow: 'Loudness → advection',
+  loudToCurl: 'Loudness → curl',
+  loudToGloss: 'Loudness → gloss',
+  brightToShift: 'Brightness → hue',
+  onsetToLight: 'Onsets → light angle',
+  loudToPulse: 'Loudness swell → exposure pulse',
+  onsetToFlash: 'Onsets → highlight flash',
+  onsetToSeed: 'Onsets → new growth + ripple',
+  spectrumToTint: 'Bass / mid / treble → tint',
+};
+
+const RANGES: ReadonlyMap<CardCouplingKey, readonly [number, number]> = new Map(
   COUPLING_DEFS.map((d) => [d.key, range(d.card, d.param)]),
 );
 

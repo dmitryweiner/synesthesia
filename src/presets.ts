@@ -102,7 +102,7 @@ export const PRESETS: readonly Preset[] = [
       { src: 1, target: 'reaction', param: 'feed', depth: 0.22 },
       { src: 2, target: 'flow', param: 'curlStrength', depth: 0.3 },
     ],
-    coupling: { loudToGloss: 0.4, brightToShift: 0.25, onsetToLight: 0.3 },
+    coupling: { loudToGloss: 0.5, brightToShift: 0.4, onsetToLight: 0.3, loudToPulse: 0.7, onsetToFlash: 0.4, onsetToSeed: 0.5, spectrumToTint: 0.6 },
   }),
 
   preset('Stillness ink', {
@@ -130,7 +130,7 @@ export const PRESETS: readonly Preset[] = [
       { src: 0, target: 'palette', param: 'lightAngle', depth: 0.5 },
       { src: 1, target: 'palette', param: 'gloss', depth: 0.2 },
     ],
-    coupling: { loudToGloss: 0.3, brightToShift: 0.15 },
+    coupling: { loudToGloss: 0.4, brightToShift: 0.3, loudToPulse: 0.8, onsetToFlash: 0.2, onsetToSeed: 0.3, spectrumToTint: 0.7 },
   }),
 
   preset('Whale coral', {
@@ -158,7 +158,7 @@ export const PRESETS: readonly Preset[] = [
       { src: 0, target: 'palette', param: 'shift', depth: 0.2 },
       { src: 2, target: 'palette', param: 'lightAngle', depth: 0.3 },
     ],
-    coupling: { loudToFlow: 0.4, brightToShift: 0.3, loudToGloss: 0.3 },
+    coupling: { loudToFlow: 0.6, brightToShift: 0.5, loudToGloss: 0.4, loudToPulse: 0.7, onsetToFlash: 0.3, onsetToSeed: 0.4, spectrumToTint: 0.8 },
   }),
 
   preset('Molten Polivoks', {
@@ -205,7 +205,7 @@ export const PRESETS: readonly Preset[] = [
       { src: 2, target: 'flow', param: 'driftY', depth: 0.25 },
       { src: 1, target: 'palette', param: 'lightAngle', depth: 0.5 },
     ],
-    coupling: { loudToGloss: 0.5, loudToCurl: 0.3 },
+    coupling: { loudToGloss: 0.6, loudToCurl: 0.5, loudToPulse: 0.8, onsetToFlash: 0.3, onsetToSeed: 0.3, spectrumToTint: 0.9 },
   }),
 
   preset('Aurora', {
@@ -238,7 +238,7 @@ export const PRESETS: readonly Preset[] = [
       { src: 2, target: 'palette', param: 'gloss', depth: 0.25 },
       { src: 1, target: 'flow', param: 'curlStrength', depth: 0.2 },
     ],
-    coupling: { brightToShift: 0.2, loudToGloss: 0.3 },
+    coupling: { brightToShift: 0.4, loudToGloss: 0.4, loudToPulse: 0.6, onsetToFlash: 0.2, onsetToSeed: 0.3, spectrumToTint: 0.8 },
   }),
 
   preset('Silver maze', {
@@ -281,7 +281,7 @@ export const PRESETS: readonly Preset[] = [
       { src: 0, target: 'palette', param: 'shift', depth: 0.15 },
       { src: 1, target: 'reaction', param: 'kill', depth: 0.05 },
     ],
-    coupling: { loudToGloss: 0.4, onsetToLight: 0.2 },
+    coupling: { loudToGloss: 0.5, onsetToLight: 0.4, loudToPulse: 0.6, onsetToFlash: 0.5, onsetToSeed: 0.4, spectrumToTint: 0.6 },
   }),
 
   preset('Space breccia', {
@@ -324,7 +324,7 @@ export const PRESETS: readonly Preset[] = [
       { src: 1, target: 'flow', param: 'driftY', depth: 0.3 },
       { src: 0, target: 'palette', param: 'lightAngle', depth: 0.4 },
     ],
-    coupling: { loudToFlow: 0.5, brightToShift: 0.2 },
+    coupling: { loudToFlow: 0.7, brightToShift: 0.4, loudToPulse: 0.8, onsetToFlash: 0.3, onsetToSeed: 0.3, spectrumToTint: 0.7 },
   }),
 
   preset('Cave coral', {
@@ -350,7 +350,7 @@ export const PRESETS: readonly Preset[] = [
       { src: 1, target: 'rain', param: 'rainPitch', depth: 0.3, exp: true },
       { src: 0, target: 'reaction', param: 'feed', depth: 0.1 },
     ],
-    coupling: { onsetToLight: 0.8, loudToGloss: 0.5 },
+    coupling: { onsetToLight: 0.8, loudToGloss: 0.6, loudToPulse: 0.4, onsetToFlash: 0.9, onsetToSeed: 1, spectrumToTint: 0.5 },
   }),
 
   preset('Loom & copper', {
@@ -394,7 +394,7 @@ export const PRESETS: readonly Preset[] = [
       { src: 3, target: 'fx', param: 'delayFb', depth: 0.2 },
       { src: 2, target: 'palette', param: 'shift', depth: 0.2 },
     ],
-    coupling: { loudToCurl: 0.4, loudToGloss: 0.3 },
+    coupling: { loudToCurl: 0.6, loudToGloss: 0.4, loudToPulse: 0.6, onsetToFlash: 0.4, onsetToSeed: 0.4, spectrumToTint: 0.7 },
   }),
 
   preset('Wind ash', {
@@ -418,7 +418,7 @@ export const PRESETS: readonly Preset[] = [
       { src: 0, target: 'flow', param: 'curlStrength', depth: 0.3 },
       { src: 1, target: 'palette', param: 'lightAngle', depth: 0.5 },
     ],
-    coupling: { loudToFlow: 0.6, loudToCurl: 0.5, brightToShift: 0.2 },
+    coupling: { loudToFlow: 0.8, loudToCurl: 0.7, brightToShift: 0.4, loudToPulse: 0.9, onsetToFlash: 0.2, onsetToSeed: 0.2, spectrumToTint: 0.6 },
   }),
 
   preset('Bell spots', {
@@ -446,7 +446,7 @@ export const PRESETS: readonly Preset[] = [
       { src: 0, target: 'palette', param: 'shift', depth: 0.3 },
       { src: 2, target: 'palette', param: 'lightAngle', depth: 0.3 },
     ],
-    coupling: { onsetToLight: 0.9, loudToGloss: 0.4 },
+    coupling: { onsetToLight: 0.9, loudToGloss: 0.5, loudToPulse: 0.5, onsetToFlash: 0.9, onsetToSeed: 1, spectrumToTint: 0.6 },
   }),
 
   preset('Subway basalt', {
@@ -469,7 +469,7 @@ export const PRESETS: readonly Preset[] = [
     palette: { paletteId: 4, contrast: 1.4, relief: 1.5, gloss: 0.5 },
     lfos: [{ shape: 'sine', rate: 0.02, phase: 0 }],
     routes: [{ src: 0, target: 'palette', param: 'lightAngle', depth: 0.4 }],
-    coupling: { loudToCurl: 0.7, loudToFlow: 0.5, loudToGloss: 0.3 },
+    coupling: { loudToCurl: 0.9, loudToFlow: 0.7, loudToGloss: 0.4, loudToPulse: 0.8, onsetToFlash: 0.4, onsetToSeed: 0.5, spectrumToTint: 0.7 },
   }),
 ];
 

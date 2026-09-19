@@ -1,5 +1,6 @@
 import {
   defaultAppState, sanitizeState, stateToAppState, cloneAppState, LFO_COUNT, COUPLING_KEYS,
+  EXPLICIT_COUPLING_KEYS, COUPLING_RANGES, COUPLING_FLOOR,
 } from '../src/state/schema';
 import type { AppState } from '../src/state/schema';
 import { FORMULA_IDS } from '../src/dsp/generator';
@@ -22,7 +23,25 @@ describe('defaultAppState', () => {
     expect(s.visual.cards.palette.params.paletteId).toBe(0);
     expect(s.mod.lfos).toHaveLength(LFO_COUNT);
     expect(s.mod.routes).toEqual([]);
-    for (const k of COUPLING_KEYS) expect(s.coupling[k]).toBe(0);
+    for (const k of COUPLING_KEYS) {
+      const explicit = EXPLICIT_COUPLING_KEYS.some((e) => e === k);
+      if (explicit) expect(s.coupling[k]).toBeGreaterThan(0);
+      else expect(s.coupling[k]).toBe(0);
+    }
+    // defaults already satisfy the floor, so old links/presets get a visible link
+    const sum = EXPLICIT_COUPLING_KEYS.reduce((a, k) => a + s.coupling[k], 0);
+    expect(sum).toBeGreaterThanOrEqual(COUPLING_FLOOR);
+  });
+
+  it('coupling ranges: card couplings are signed, explicit ones are 0..1', () => {
+    for (const k of COUPLING_KEYS) {
+      const explicit = EXPLICIT_COUPLING_KEYS.some((e) => e === k);
+      expect(COUPLING_RANGES[k]).toEqual(explicit ? [0, 1] : [-1, 1]);
+    }
+    const s = stateToAppState({ coupling: { onsetToSeed: -0.5, loudToPulse: 3, loudToGloss: -3 } });
+    expect(s.coupling.onsetToSeed).toBe(0);
+    expect(s.coupling.loudToPulse).toBe(1);
+    expect(s.coupling.loudToGloss).toBe(-1);
   });
 
   it('returns fresh objects each call', () => {

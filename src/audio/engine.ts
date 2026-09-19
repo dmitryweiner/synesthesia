@@ -34,6 +34,11 @@ const GAIN_SMOOTH = 0.02;      // s — generator on/off smoothing
 const PARAM_SMOOTH = 0.05;     // s — gain changes during morphs
 const FX_MOD_INTERVAL_MS = 25; // ~40 Hz control rate for LFO → FX
 const FX_SMOOTH_TC = 0.03;     // s — smoothing of modulated FX params
+const DUCK_TC = 0.006;         // s — master fade-out before a topology change
+const REROUTE_GAP_MS = 30;     // wait before reconnecting FX while ducked (≈5·DUCK_TC)
+const REROUTE_RETURN_TC = 0.015;
+const SWITCH_GAP_MS = 40;      // preset switch: duck, rebuild FX, apply, fade in
+const SWITCH_RETURN_TC = 0.05; // ≈150 ms fade-in of the new preset
 
 function makeImpulseResponse(ctx: BaseAudioContext, seconds: number, decay: number): AudioBuffer {
   const sr = ctx.sampleRate;
@@ -111,6 +116,17 @@ export class AudioEngine {
   private startTime = 0;
   private fxModTimer: ReturnType<typeof setInterval> | null = null;
 
+  // Clicks come from changing the FX topology (connect/disconnect with
+  // signal in the chain) and from FX tails of a previous preset (a delay line
+  // whose time jumps pitch-warbles its old content). So: the master "ducks"
+  // around every rerouting, and a preset switch rebuilds the FX nodes from
+  // scratch while ducked (switchTo).
+  private masterLevel = 0.75;
+  private ducked = false;
+  private rerouteTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingRouting: FxState | null = null;
+  private freshParams = false;
+
   get running(): boolean {
     return this.ctx !== null;
   }
@@ -146,18 +162,39 @@ export class AudioEngine {
    * graph, with FX modulation scheduled ahead as automation instead of the
    * live control-rate timer.
    */
-  static async renderOffline(state: EngineState, seconds: number, sampleRate = 44100): Promise<Float32Array> {
+  static async renderOffline(
+    state: EngineState, seconds: number, sampleRate = 44100,
+    switches: readonly { t: number; state: EngineState }[] = [],
+  ): Promise<Float32Array> {
     const ctx = new OfflineAudioContext(1, Math.max(1, Math.round(seconds * sampleRate)), sampleRate);
     await ctx.audioWorklet.addModule(workletUrl);
     const eng = new AudioEngine();
     eng.offline = true;
     eng.build(ctx, state);
-    const routes = eng.fxRoutes();
-    if (routes.length > 0 && eng.baseFx && eng.modState) {
-      for (let t = 0; t < seconds; t += FX_MOD_INTERVAL_MS / 1000) {
+    const scheduleFxMod = (from: number, to: number): void => {
+      const routes = eng.fxRoutes();
+      if (routes.length === 0 || !eng.baseFx || !eng.modState) return;
+      for (let t = from; t < to; t += FX_MOD_INTERVAL_MS / 1000) {
         eng.applyFxParams(modulateFx(eng.baseFx, routes, eng.modState.lfos, t), t);
       }
-    }
+    };
+    const sorted = [...switches].sort((a, b) => a.t - b.t);
+    scheduleFxMod(0, sorted[0]?.t ?? seconds);
+    // A preset switch mid-render runs the same two phases as the live
+    // switchTo(): duck at t, rebuild + apply + fade in SWITCH_GAP later
+    // (scripts/analyze.mjs --switch measures the result).
+    const gap = SWITCH_GAP_MS / 1000;
+    sorted.forEach((sw, i) => {
+      void ctx.suspend(sw.t).then(() => {
+        eng.beginSwitch();
+        void ctx.resume();
+      });
+      void ctx.suspend(sw.t + gap).then(() => {
+        eng.finishSwitch(sw.state);
+        scheduleFxMod(sw.t + gap, sorted[i + 1]?.t ?? seconds);
+        void ctx.resume();
+      });
+    });
     const buf = await ctx.startRendering();
     return buf.getChannelData(0);
   }
@@ -172,6 +209,45 @@ export class AudioEngine {
     this.mixBus = ctx.createGain();
     this.mixBus.gain.value = 1;
 
+    this.createFx(ctx);
+
+    this.master = ctx.createGain();
+    this.master.gain.value = state.masterGain;
+    this.masterLevel = state.masterGain;
+
+    this.startTime = ctx.currentTime;
+    this.modState = state.mod ?? null;
+    this.applyFx(state.fx);
+
+    for (const f of FORMULAS) {
+      const setting = state.formulas[f.id];
+      const params: Params = setting ? { ...setting.params } : {};
+      const enabled = setting ? setting.enabled : false;
+      const aw = new AudioWorkletNode(ctx, 'formula-generator', {
+        numberOfInputs: 0,
+        numberOfOutputs: 1,
+        outputChannelCount: [1],
+        processorOptions: {
+          formula: f.id, params, enabled,
+          mod: this.modPayloadFor(f.id),
+        },
+      });
+      const g = ctx.createGain();
+      g.gain.value = 0;
+      aw.connect(g);
+      g.connect(this.mixBus);
+      this.nodes.set(f.id, { aw, g });
+      this.enabledMap.set(f.id, enabled);
+
+      if (setting) {
+        const gain = typeof params.gain === 'number' ? params.gain : 0;
+        g.gain.setTargetAtTime(enabled ? gain : 0, ctx.currentTime, GAIN_SMOOTH);
+      }
+    }
+  }
+
+  /** Creates every FX node (fresh delay lines/convolver: no tails). */
+  private createFx(ctx: BaseAudioContext): void {
     this.filterNode = ctx.createBiquadFilter();
     this.formantBands = [];
     this.formantGains = [];
@@ -236,39 +312,88 @@ export class AudioEngine {
     this.phaserInput = ctx.createGain();
     this.phaserOutput = ctx.createGain();
     this.phaserSum = ctx.createGain();
+    this.routingKey = '';
+    this.phaserStagesConnected = 0;
+  }
 
-    this.master = ctx.createGain();
-    this.master.gain.value = state.masterGain;
-
-    this.startTime = ctx.currentTime;
-    this.modState = state.mod ?? null;
-    this.applyFx(state.fx);
-
-    for (const f of FORMULAS) {
-      const setting = state.formulas[f.id];
-      const params: Params = setting ? { ...setting.params } : {};
-      const enabled = setting ? setting.enabled : false;
-      const aw = new AudioWorkletNode(ctx, 'formula-generator', {
-        numberOfInputs: 0,
-        numberOfOutputs: 1,
-        outputChannelCount: [1],
-        processorOptions: {
-          formula: f.id, params, enabled,
-          mod: this.modPayloadFor(f.id),
-        },
-      });
-      const g = ctx.createGain();
-      g.gain.value = 0;
-      aw.connect(g);
-      g.connect(this.mixBus);
-      this.nodes.set(f.id, { aw, g });
-      this.enabledMap.set(f.id, enabled);
-
-      if (setting) {
-        const gain = typeof params.gain === 'number' ? params.gain : 0;
-        g.gain.setTargetAtTime(enabled ? gain : 0, ctx.currentTime, GAIN_SMOOTH);
-      }
+  /** Disconnects and releases every FX node (their tails go with them). */
+  private destroyFx(): void {
+    const nodes: AudioNode[] = [
+      this.filterNode, ...this.formantBands, ...this.formantGains, this.formantSum,
+      this.combInput, this.combDelay, this.combFb,
+      this.chorusDelay, this.chorusDry, this.chorusWet, this.chorusFb, this.chorusSum, this.chorusLFOGain,
+      this.reverbConv, this.reverbDry, this.reverbWet, this.reverbSum, this.limiter,
+      this.delayNode, this.delayDry, this.delayWet, this.delayFb, this.delaySum,
+      ...this.phaserFilters, ...this.phaserLFOGains, this.phaserDry, this.phaserWet, this.phaserFb,
+      this.phaserInput, this.phaserOutput, this.phaserSum,
+    ];
+    for (const n of nodes) n.disconnect();
+    for (const osc of [this.chorusLFO, this.phaserLFO]) {
+      try { osc.stop(); } catch { /* already stopped */ }
+      osc.disconnect();
     }
+  }
+
+  private duck(): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    this.ducked = true;
+    this.master.gain.cancelScheduledValues(ctx.currentTime);
+    this.master.gain.setTargetAtTime(0, ctx.currentTime, DUCK_TC);
+  }
+
+  private unduck(tc: number): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    this.ducked = false;
+    this.master.gain.cancelScheduledValues(ctx.currentTime);
+    this.master.gain.setTargetAtTime(this.masterLevel, ctx.currentTime, tc);
+  }
+
+  /** Reroutes the FX chain behind a short master dip (live morphs toggling an FX module). */
+  private rerouteSmoothly(fx: FxState): void {
+    this.pendingRouting = fx;
+    if (this.rerouteTimer !== null) return;
+    this.duck();
+    this.rerouteTimer = setTimeout(() => {
+      this.rerouteTimer = null;
+      const pending = this.pendingRouting;
+      this.pendingRouting = null;
+      if (!this.ctx || !pending) return;
+      this.applyRouting(pending);
+      this.unduck(REROUTE_RETURN_TC);
+    }, REROUTE_GAP_MS);
+  }
+
+  /** Phase 1 of a preset switch: fade the master out. */
+  beginSwitch(): void {
+    this.duck();
+  }
+
+  /** Phase 2: fresh FX nodes (no old tails), the new state applied at once, fade in. */
+  finishSwitch(state: EngineState): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    if (this.rerouteTimer !== null) {
+      clearTimeout(this.rerouteTimer);
+      this.rerouteTimer = null;
+      this.pendingRouting = null;
+    }
+    this.destroyFx();
+    this.createFx(ctx);
+    this.freshParams = true;
+    this.masterLevel = state.masterGain;
+    this.applyState(state);
+    this.freshParams = false;
+    this.unduck(SWITCH_RETURN_TC);
+  }
+
+  /** A hard switch to a different point (preset / link): no clicks, no tails of the old one. */
+  async switchTo(state: EngineState): Promise<void> {
+    if (!this.ctx) return;
+    this.beginSwitch();
+    await new Promise((r) => setTimeout(r, SWITCH_GAP_MS));
+    this.finishSwitch(state);
   }
 
   /** Fades the master out and closes the context. */
@@ -277,19 +402,22 @@ export class AudioEngine {
     if (!ctx) return;
     this.stopFxModTimer();
     this.master.gain.setTargetAtTime(0, ctx.currentTime, 0.01);
+    if (this.rerouteTimer !== null) clearTimeout(this.rerouteTimer);
+    this.rerouteTimer = null;
     await new Promise((r) => setTimeout(r, 80));
-    try { this.chorusLFO.stop(); } catch { /* already stopped */ }
-    try { this.phaserLFO.stop(); } catch { /* already stopped */ }
+    this.destroyFx();
     if (ctx instanceof AudioContext) await ctx.close();
     this.ctx = null;
     this.analyserNode = null;
     this.nodes.clear();
     this.enabledMap.clear();
     this.routingKey = '';
+    this.ducked = false;
   }
 
   setMasterGain(v: number): void {
-    if (this.ctx) this.master.gain.setTargetAtTime(v, this.ctx.currentTime, PARAM_SMOOTH);
+    this.masterLevel = v;
+    if (this.ctx && !this.ducked) this.master.gain.setTargetAtTime(v, this.ctx.currentTime, PARAM_SMOOTH);
   }
 
   /** Full FX application: routing (only if the on/type/stage set changed) + params (+ mod timer). */
@@ -298,8 +426,11 @@ export class AudioEngine {
     this.baseFx = fx;
     const key = [fx.filterOn, fx.filterType, fx.chorusOn, fx.phaserOn, fx.phaserStages, fx.delayOn, fx.reverbOn, fx.limiterOn].join('|');
     if (key !== this.routingKey) {
+      const first = this.routingKey === '';
       this.routingKey = key;
-      this.applyRouting(fx);
+      // Live and already sounding: dip the master around the reconnect.
+      if (first || this.offline || this.ducked) this.applyRouting(fx);
+      else this.rerouteSmoothly(fx);
     }
     this.updateFxMod();
   }
@@ -318,7 +449,7 @@ export class AudioEngine {
   private updateFxMod(): void {
     if (!this.ctx || !this.baseFx) return;
     if (this.offline) {
-      this.applyFxParams(this.baseFx, 0); // renderOffline schedules the modulation itself
+      this.applyFxParams(this.baseFx); // renderOffline schedules the modulation itself
       return;
     }
     if (this.fxRoutes().length > 0) {
@@ -465,8 +596,11 @@ export class AudioEngine {
     // Values arrive at control rate during modulation AND during genome
     // morphs, so always smooth: setValueAtTime would zipper/click, which the
     // phaser's feedback loop rings on.
+    // Freshly built nodes (preset switch) take their values at once.
+    const fresh = this.freshParams;
     const set = (p: AudioParam, v: number): void => {
-      p.setTargetAtTime(v, now, FX_SMOOTH_TC);
+      if (fresh) p.setValueAtTime(v, now);
+      else p.setTargetAtTime(v, now, FX_SMOOTH_TC);
     };
 
     const fmode = filterMode(fx.filterType);

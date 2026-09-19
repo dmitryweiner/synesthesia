@@ -4,7 +4,7 @@ import type { AppState } from '../state/schema';
 import { COUPLING_KEYS } from '../state/schema';
 import { FORMULAS, FX_ON_KEYS, FX_PARAM_LABELS, isFxModParam } from '../schema/audio';
 import { CARDS } from '../schema/visual';
-import { COUPLING_DEFS } from '../coupling';
+import { COUPLING_LABELS } from '../coupling';
 import type { SoundAnalysis } from '../analysis/fractal';
 import { make } from './dom';
 
@@ -82,6 +82,6 @@ export function renderDetails(root: HTMLElement, state: AppState, analysis: Soun
 
   const coupling = COUPLING_KEYS
     .filter((k) => Math.abs(state.coupling[k]) > 0.01)
-    .map((k) => `${COUPLING_DEFS.find((d) => d.key === k)?.label ?? k} ${state.coupling[k] >= 0 ? '+' : ''}${fmt(state.coupling[k])}`);
+    .map((k) => `${COUPLING_LABELS[k]} ${state.coupling[k] >= 0 ? '+' : ''}${fmt(state.coupling[k])}`);
   section(root, 'Sound → image', coupling);
 }

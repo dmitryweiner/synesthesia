@@ -71,6 +71,66 @@ starting points of every exploration.
    **24 s @ 8 kHz ρ = 0.73** at about the same render cost (~2.4 s per
    candidate on the aarch64 dev box) → the scout uses 24 s @ 8 kHz.
 
+## Decisions after user testing (agreed with the user, 2026-09-19)
+
+8. **Make the sound → image link more explicit** (all four options chosen):
+   - *Pulse*: loudness swells (loudness relative to its ~4 s average)
+     breathe the picture's exposure/contrast, every onset flashes the
+     highlight — display-level, reacts in the same frame.
+   - *Onsets seed growth*: each detected onset (bell strike, drop, attack)
+     drops fresh "ink" into the reaction at a random spot and sends a ripple
+     out from it — you see new growth exactly when you hear the hit.
+   - *Spectrum → colour*: bass / mid / treble energy tints the dark / mid /
+     light tones of the palette (warm red → amber → cold cyan).
+   - *Stronger by default*: presets get stronger coupling, and a floor keeps
+     evolution from muting the link (the four explicit couplings above sum
+     to ≥ 1.2 after every proposal).
+   The new strengths are genes (`loudToPulse`, `onsetToFlash`,
+   `onsetToSeed`, `spectrumToTint`, range 0..1) like the existing couplings.
+   *Measured, not guessed:* `src/audio/analyserSim.ts` emulates the browser
+   AnalyserNode, so `tests/onsets.test.ts` runs the live feature/onset
+   pipeline on the presets' real audio. The first onset detector (flux over
+   1024 linear bins, fixed gain) found 0 drops in *Cave coral* and 1 bell in
+   16 s once reverb smeared the attacks; the adaptive detector (rise of 20
+   log bands vs recent mean + 3·deviation), compared on real-graph renders of
+   all 12 presets, finds ~14 drops / 20 s and every bell strike while steady
+   drones stay at ≈1 (the start). Exposure now swings ≈0.85–1.45 on
+   drones (was 0.97–1.26); smoothing is time-based so 30 fps devices react
+   like 60 fps ones.
+9. **Short share links via a Cloudflare Worker + D1** (same stack as
+   ../monitoring). 🔗 Share POSTs the point to the Worker, which validates it
+   with the app's own `sanitizeState`/`stateToAppState`, stores canonical
+   JSON in D1 and returns an id; the link is `?presetId=<id>`.
+   - *Id = content hash*: first 10 base62 characters of SHA-256 of the
+     canonical (sorted-key) JSON — the same point always gets the same link,
+     no duplicates, re-sharing is idempotent, ids can't be enumerated.
+   - *Clean address bar*: the long `#s=` is no longer written to the URL; the
+     current point survives a reload through localStorage
+     (`synesthesia_last_point_v1`). After Share the address shows
+     `?presetId=…` until the next step. Old `#s=` links keep opening. If the
+     Worker is unreachable, Share falls back to copying the long `#s=` link.
+   - Limits: 16 KB per point, per-IP rate limits, a daily insert cap; points
+     are kept indefinitely (content-addressed, ~4 KB each).
+
+## Bugs found after user testing (2026-09-19)
+
+- **Harsh beating on preset switches / morphs / LFO routes — fixed.** The
+  user heard it and couldn't remove it (suspected the previous preset still
+  sounding). Root cause, proven by `tests/continuity.test.ts`: the oscillators
+  ported from formula-synth computed `sin(2π·f·t)` from absolute time, so any
+  frequency change jumped the phase by 2π·Δf·t — growing with how long the
+  sound had played. With a slow shallow LFO on a frequency, 60 s after start
+  FM/PM/beats/dist were 17–22× "rougher" (HF energy ratio), additive 5.7×,
+  bells/quasi ~2×. All oscillators now accumulate phase; for constant params
+  the sound is unchanged. (formula-synth has the same latent bug.)
+- **Clicks and old tails on preset switch — fixed.** `analyze.mjs --switch`
+  renders preset chains through the live `applyState` path offline: 2
+  clicks at switches before, 0 after. A preset/link load is now a hard switch
+  (`AudioEngine.switchTo`): master ducks (~20 ms), FX nodes are rebuilt so no
+  delay/reverb tail of the old point pitch-warbles on, the new point is
+  applied at once and fades in (~150 ms). Morph-time FX re-routing is done
+  behind a short master dip.
+
 ## Architecture
 
 ```

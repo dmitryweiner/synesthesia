@@ -5,7 +5,7 @@
 // disabled formula's params, an off card's params, an unused route slot.
 import { FORMULAS, FX_MOD_PARAMS, FX_PARAM_RANGES, FX_PARAM_MODULE, FX_EXP_PARAMS, FX_PARAM_LABELS, FX_ON_KEYS, FILTER_TYPES, CHORUS_MODES, PHASER_STAGES, REVERB_DECAY_RANGE } from '../schema/audio';
 import { CARDS, ALWAYS_ON_CARD_IDS } from '../schema/visual';
-import { COUPLING_KEYS, LFO_COUNT } from '../state/schema';
+import { COUPLING_KEYS, COUPLING_RANGES, LFO_COUNT } from '../state/schema';
 
 export type GeneKind = 'cont' | 'bool' | 'choice';
 
@@ -141,7 +141,8 @@ function buildGenes(): GeneDef[] {
   }
 
   for (const k of COUPLING_KEYS) {
-    genes.push({ id: `c.${k}`, label: `Coupling · ${k}`, kind: 'cont', group: 'coupling', min: -1, max: 1 });
+    const [min, max] = COUPLING_RANGES[k];
+    genes.push({ id: `c.${k}`, label: `Coupling · ${k}`, kind: 'cont', group: 'coupling', min, max });
   }
   return genes;
 }

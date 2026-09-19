@@ -33,6 +33,9 @@ describe('genes', () => {
       expect(geneById(`route.${i}.depth`)?.activeIf).toBe(`route.${i}.on`);
     }
     expect(geneById('c.loudToFlow')?.min).toBe(-1);
+    expect(geneById('c.onsetToSeed')?.min).toBe(0);
+    expect(geneById('c.onsetToSeed')?.max).toBe(1);
+    expect(geneById('c.spectrumToTint')?.kind).toBe('cont');
   });
 
   it('every activeIf points at an existing bool gene', () => {

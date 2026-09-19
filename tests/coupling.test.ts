@@ -1,5 +1,5 @@
-import { applyCoupling, COUPLING_DEFS } from '../src/coupling';
-import { COUPLING_KEYS, defaultAppState } from '../src/state/schema';
+import { applyCoupling, COUPLING_DEFS, COUPLING_LABELS } from '../src/coupling';
+import { COUPLING_KEYS, EXPLICIT_COUPLING_KEYS, defaultAppState } from '../src/state/schema';
 import { SILENT_FEATURES } from '../src/audio/features';
 import { cardDef } from '../src/schema/visual';
 
@@ -17,13 +17,15 @@ function zeroCoupling() {
 }
 
 describe('coupling', () => {
-  it('every coupling key has a definition', () => {
-    expect(COUPLING_DEFS.map((d) => d.key).sort()).toEqual([...COUPLING_KEYS].sort());
+  it('card couplings + explicit (display/seed) couplings cover every key; every key has a label', () => {
+    const covered = [...COUPLING_DEFS.map((d) => d.key), ...EXPLICIT_COUPLING_KEYS].sort();
+    expect(covered).toEqual([...COUPLING_KEYS].sort());
+    for (const k of COUPLING_KEYS) expect(COUPLING_LABELS[k]).toMatch(/\S/);
   });
 
   it('zero coupling or silent features → params unchanged (but cloned)', () => {
     const base = cards();
-    const a = applyCoupling(base, { loudness: 1, brightness: 1, onset: 1 }, zeroCoupling());
+    const a = applyCoupling(base, { ...SILENT_FEATURES, loudness: 1, brightness: 1, onset: 1 }, zeroCoupling());
     expect(a).toEqual(base);
     expect(a).not.toBe(base);
     const c = zeroCoupling();
@@ -35,7 +37,7 @@ describe('coupling', () => {
     const base = cards();
     const c = zeroCoupling();
     c.loudToFlow = 1; c.loudToCurl = 1; c.loudToGloss = 1;
-    const out = applyCoupling(base, { loudness: 1, brightness: 0.5, onset: 0 }, c);
+    const out = applyCoupling(base, { ...SILENT_FEATURES, loudness: 1, brightness: 0.5 }, c);
     expect(out.flow.advectAmount).toBeGreaterThan(base.flow.advectAmount);
     expect(out.flow.curlStrength).toBeGreaterThan(base.flow.curlStrength);
     expect(out.palette.gloss).toBeGreaterThan(base.palette.gloss);
@@ -45,14 +47,14 @@ describe('coupling', () => {
     expect(out.flow.advectAmount).toBeLessThanOrEqual(adv.max);
     // negative coupling pulls the other way
     c.loudToGloss = -1;
-    expect(applyCoupling(base, { loudness: 1, brightness: 0.5, onset: 0 }, c).palette.gloss).toBeLessThan(base.palette.gloss);
+    expect(applyCoupling(base, { ...SILENT_FEATURES, loudness: 1, brightness: 0.5 }, c).palette.gloss).toBeLessThan(base.palette.gloss);
   });
 
   it('brightness shifts the palette hue cyclically; onsets rotate the light', () => {
     const base = cards();
     const c = zeroCoupling();
     c.brightToShift = 1; c.onsetToLight = 1;
-    const hi = applyCoupling(base, { loudness: 0, brightness: 1, onset: 1 }, c);
+    const hi = applyCoupling(base, { ...SILENT_FEATURES, brightness: 1, onset: 1 }, c);
     expect(hi.palette.shift).not.toBe(base.palette.shift);
     expect(hi.palette.shift).toBeGreaterThanOrEqual(0);
     expect(hi.palette.shift).toBeLessThan(1);
@@ -60,6 +62,6 @@ describe('coupling', () => {
     expect(hi.palette.lightAngle).toBeGreaterThanOrEqual(0);
     expect(hi.palette.lightAngle).toBeLessThan(2 * Math.PI);
     // brightness at its midpoint is neutral
-    expect(applyCoupling(base, { loudness: 0, brightness: 0.5, onset: 0 }, c).palette.shift).toBeCloseTo(base.palette.shift, 12);
+    expect(applyCoupling(base, { ...SILENT_FEATURES, brightness: 0.5 }, c).palette.shift).toBeCloseTo(base.palette.shift, 12);
   });
 });

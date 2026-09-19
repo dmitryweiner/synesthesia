@@ -1,4 +1,4 @@
-import { rmsOf, spectralCentroid, spectralFlux, FeatureTracker } from '../src/audio/features';
+import { rmsOf, spectralCentroid, spectralFlux, FeatureTracker, OnsetDetector, SILENT_FEATURES } from '../src/audio/features';
 
 function sine(n: number, freq: number, sr: number, amp = 1): Float32Array {
   const out = new Float32Array(n);
@@ -67,5 +67,80 @@ describe('FeatureTracker', () => {
     let later = spike;
     for (let i = 0; i < 20; i++) later = tr.update(td, loud).onset;
     expect(later).toBeLessThan(spike);
+  });
+});
+
+describe('FeatureTracker: swell and spectral bands', () => {
+  function binsWith(level: number, lo: number, hi: number, sr = 48000, n = 512): Uint8Array {
+    const b = new Uint8Array(n);
+    const hz = sr / 2 / n;
+    for (let i = 0; i < n; i++) if (i * hz >= lo && i * hz < hi) b[i] = level;
+    return b;
+  }
+
+  it('swell is ~0 for a steady level and positive right after the sound gets louder', () => {
+    const tr = new FeatureTracker(48000);
+    const quiet = sine(2048, 220, 48000, 0.1);
+    const loud = sine(2048, 220, 48000, 0.4);
+    const bins = new Uint8Array(512).fill(100);
+    let f = tr.update(quiet, bins, 1 / 60);
+    for (let i = 0; i < 60 * 10; i++) f = tr.update(quiet, bins, 1 / 60);
+    // (a small residue of the start-up rise: ≈2% exposure at most — invisible)
+    expect(Math.abs(f.swell)).toBeLessThan(0.1);
+    for (let i = 0; i < 20; i++) f = tr.update(loud, bins, 1 / 60);
+    expect(f.swell).toBeGreaterThan(0.3);
+    for (let i = 0; i < 60 * 20; i++) f = tr.update(loud, bins, 1 / 60);
+    expect(Math.abs(f.swell)).toBeLessThan(0.1); // adapted: the new level is the new normal
+    for (let i = 0; i < 30; i++) f = tr.update(quiet, bins, 1 / 60);
+    expect(f.swell).toBeLessThan(-0.3);
+    expect(f.swell).toBeGreaterThanOrEqual(-1);
+  });
+
+  it('low / mid / high follow energy in their bands, each in [0,1]', () => {
+    const td = sine(2048, 440, 48000, 0.3);
+    const settle = (bins: Uint8Array) => {
+      const tr = new FeatureTracker(48000);
+      let f = tr.update(td, bins, 1 / 60);
+      for (let i = 0; i < 60; i++) f = tr.update(td, bins, 1 / 60);
+      return f;
+    };
+    const bass = settle(binsWith(220, 30, 250));
+    const treble = settle(binsWith(220, 2000, 10000));
+    expect(bass.low).toBeGreaterThan(0.5);
+    expect(bass.high).toBeLessThan(0.1);
+    expect(treble.high).toBeGreaterThan(0.5);
+    expect(treble.low).toBeLessThan(0.1);
+    for (const f of [bass, treble]) for (const v of [f.low, f.mid, f.high]) {
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('SILENT_FEATURES carries neutral values for the new fields', () => {
+    expect(SILENT_FEATURES).toEqual({ loudness: 0, brightness: 0, onset: 0, swell: 0, low: 0, mid: 0, high: 0 });
+  });
+});
+
+describe('OnsetDetector', () => {
+  it('fires once per rising edge above the threshold, with a refractory period', () => {
+    const d = new OnsetDetector();
+    const fired: number[] = [];
+    // two spikes 0.5 s apart, each decaying over several frames, then a spike too soon
+    const series: [number, number][] = [];
+    let t = 0;
+    const spike = () => { for (const v of [0.9, 0.7, 0.5, 0.35, 0.2, 0.1, 0.05]) { series.push([t, v]); t += 1 / 60; } };
+    spike(); t += 0.4; spike();
+    // a re-armed but too-early hit: 2 frames after a fresh one (< 120 ms refractory)
+    t += 0.3;
+    series.push([t, 0.9], [t + 1 / 60, 0.1], [t + 2 / 60, 0.9]);
+    for (const [time, v] of series) if (d.update(v, time)) fired.push(time);
+    expect(fired.length).toBe(3);
+    expect(fired[1] - fired[0]).toBeGreaterThan(0.4);
+    expect(fired[2]).toBeCloseTo(t, 9); // the one 2 frames later was swallowed
+  });
+
+  it('never fires on silence or a steady low onset level', () => {
+    const d = new OnsetDetector();
+    for (let i = 0; i < 600; i++) expect(d.update(i % 2 ? 0.1 : 0.15, i / 60)).toBe(false);
   });
 });
