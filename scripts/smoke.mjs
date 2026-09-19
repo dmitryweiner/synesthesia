@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 // Browser smoke test — the only way to exercise WebGL2 + Web Audio (vitest
 // can't load them). Boots the app, starts sound, presses every feedback
-// button, undoes, loads every preset, saves a point and reloads it, opens a
-// share link in a second tab. Fails on any console/page error or broken
+// button, undoes, loads every preset, saves a point and reloads it (the last
+// point comes back), shares a short ?presetId= link through a LOCAL points
+// Worker (Miniflare, never production) and opens it in a second tab, opens
+// an old #s= link, and checks the long-link fallback when the Worker is
+// unreachable. Fails on any console/page error or broken
 // invariant; checks invariants only, never pixels.
 //
 //   node scripts/smoke.mjs [--preview] [--mobile] [--res 128] [--screenshot shots/smoke.png]
@@ -12,11 +15,21 @@
 // second tab's navigation to time out.
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { parseFlags, ensureServer, launchBrowser, captureErrors, openApp, withRes } from './lib.mjs';
+import { parseFlags, ensureServer, launchBrowser, captureErrors, openApp, withRes, withParam, startPointsWorker } from './lib.mjs';
 
 const { flags } = parseFlags(process.argv.slice(2), ['screenshot', 'res']);
 const RES = Number(flags.get('res') ?? 128);
 const { BASE, stop } = await ensureServer(flags.has('preview'));
+const worker = await startPointsWorker();
+// every app URL: small grid + the local points Worker
+const app = (url) => withParam(withRes(url, RES), 'api', worker.url);
+const lastPoint = (p = page) => p.evaluate(() => localStorage.getItem('synesthesia_last_point_v1'));
+// Same point, up to float noise (a restored point goes through the genome
+// codec, e.g. 55 → 55.00000000000001).
+function samePoint(a, b) {
+  const norm = (json) => JSON.stringify(JSON.parse(json), (_k, v) => (typeof v === 'number' ? Number(v.toPrecision(9)) : v));
+  try { return norm(a) === norm(b); } catch { return false; }
+}
 
 const errors = [];
 let ctxLabel = 'boot';
@@ -36,11 +49,12 @@ const statusText = async (p = page) => (await p.locator('#status').textContent()
 const hashOf = (p = page) => p.evaluate(() => location.hash);
 const MORPH_WAIT = 2400; // > MORPH_SECONDS in main.ts
 
-await openApp(page, withRes(BASE, RES), { keepHelp: true });
+await openApp(page, app(BASE), { keepHelp: true });
 check(await page.locator('#help').isVisible(), 'help dialog should open on first visit');
 await page.locator('#helpCloseBtn').click();
 check((await statusText()).includes('Fractal garden'), 'default preset is not Fractal garden');
-check((await hashOf()).startsWith('#s='), 'URL hash does not carry the point');
+check((await hashOf()) === '', 'the address bar must not carry the point (#s=)');
+check(!!(await lastPoint()), 'the current point is not kept in localStorage');
 check(await page.locator('#webglError').isHidden(), 'WebGL error shown');
 
 // --- sound ---
@@ -61,13 +75,14 @@ await page.locator('#detailsBtn').click();
 
 // --- feedback loop ---
 ctxLabel = 'like';
-const hash0 = await hashOf();
+const last0 = await lastPoint();
 await page.locator('#likeBtn').click();
 await page.waitForTimeout(300);
 check((await statusText()).includes('continuing'), 'like status missing');
 if (scouted) check((await statusText()).includes('scouted: best of 3'), `like did not use the scout: "${await statusText()}"`);
 await page.waitForTimeout(MORPH_WAIT);
-check((await hashOf()) !== hash0, 'hash unchanged after like');
+check((await lastPoint()) !== last0, 'last point not updated after like');
+check((await hashOf()) === '', 'the address bar must stay clean after a step');
 check(!(await page.locator('#undoBtn').isDisabled()), 'undo should be enabled after like');
 
 ctxLabel = 'dislike';
@@ -131,7 +146,7 @@ for (const v of values) {
 ctxLabel = 'preset-query';
 const qp = await context.newPage();
 captureErrors(qp, errors, () => 'preset-query');
-await openApp(qp, withRes(`${BASE}/?preset=2`, RES));
+await openApp(qp, app(`${BASE}/?preset=2`));
 const q2 = await page.$eval('#presetSel option[value="b:2"]', (o) => o.textContent ?? '');
 check((await statusText(qp)).includes(q2.replace(/^2: /, '')), `?preset=2 did not load "${q2}"`);
 await qp.close();
@@ -143,9 +158,12 @@ await page.locator('#saveBtn').click();
 await page.waitForTimeout(300);
 const userOpts = await page.$$eval('#presetSel option', (els) => els.map((o) => o.value).filter((v) => v.startsWith('u:')));
 check(userOpts.length === 1, 'saved point missing from the list');
+const beforeReload = await lastPoint();
 await page.reload();
 await page.waitForSelector('body[data-ready="1"]', { timeout: 30000 });
 check(await page.locator('#help').isHidden(), 'help dialog should not reopen after the first visit');
+check((await statusText()).startsWith('restored'), `reload should restore the last point: "${await statusText()}"`);
+check(samePoint(await lastPoint(), beforeReload), 'restored point differs from the one before the reload');
 check(((await page.locator('#audioBtn').textContent()) ?? '').includes('▶'), 'audio must not autostart after reload');
 await page.locator('#audioBtn').click();
 await page.waitForTimeout(1500);
@@ -156,19 +174,33 @@ await page.selectOption('#presetSel', 'u:0');
 await page.waitForTimeout(500);
 check((await statusText()).includes('Smoke point'), 'loading the saved point');
 
-// --- share link round trip ---
+// --- share: short link through the (local) points Worker ---
 ctxLabel = 'share';
 await page.locator('#likeBtn').click();
 await page.waitForTimeout(MORPH_WAIT);
 await page.locator('#shareBtn').click();
-await page.waitForTimeout(300);
+await page.waitForFunction(() => (document.getElementById('status')?.textContent ?? '').includes('copied'), null, { timeout: 15000 }).catch(() => {});
+check((await statusText()).startsWith('short link copied'), `share status: "${await statusText()}"`);
 const clip = await page.evaluate(() => navigator.clipboard.readText()).catch(() => '');
-check(clip.includes('#s='), 'share link not copied');
-if (clip.includes('#s=')) {
+const idMatch = /[?&]presetId=([0-9A-Za-z]{10})(?:&|$)/.exec(clip);
+check(!!idMatch, `short link not copied: "${clip}"`);
+check(!clip.includes('#s='), 'the short link must not carry the long token');
+check(clip.length < 160, `short link is ${clip.length} chars`);
+check((await page.evaluate(() => location.search)).includes('presetId='), 'the address bar should show the short link after Share');
+check((await worker.db.prepare('SELECT COUNT(*) AS n FROM points').first()).n === 1, 'point not stored');
+// sharing the same point again is idempotent (same id, no new row)
+await page.locator('#shareBtn').click();
+await page.waitForTimeout(1500);
+const clip2 = await page.evaluate(() => navigator.clipboard.readText()).catch(() => '');
+check(clip2 === clip, 're-sharing the same point should give the same link');
+check((await worker.db.prepare('SELECT COUNT(*) AS n FROM points').first()).n === 1, 're-share stored a duplicate');
+if (idMatch) {
   const page2 = await context.newPage();
   captureErrors(page2, errors, () => 'share:page2');
-  await openApp(page2, withRes(clip, RES));
-  check((await statusText(page2)).startsWith('opened link'), 'share link did not open');
+  await openApp(page2, withRes(clip, RES)); // clip already carries ?api=
+  await page2.waitForSelector('body[data-launched="1"]', { timeout: 30000 });
+  check((await statusText(page2)).startsWith('opened link'), `short link did not open: "${await statusText(page2)}"`);
+  check((await page2.evaluate(() => location.search)).includes(`presetId=${idMatch[1]}`), 'opened link should keep ?presetId= until the next step');
   await page2.locator('#detailsBtn').click();
   await page.locator('#detailsBtn').click();
   await page.waitForTimeout(200);
@@ -181,7 +213,41 @@ if (clip.includes('#s=')) {
   const b = await page2.locator('#details').evaluate(pointText);
   check(a === b, 'shared point differs from the original');
   await page.locator('#detailsBtn').click();
+  // a step drops ?presetId= from the address bar
+  await page2.locator('#likeBtn').click();
+  await page2.waitForTimeout(300);
+  check(!(await page2.evaluate(() => location.search)).includes('presetId='), '?presetId= should go away after a step');
   await page2.close();
+}
+
+// --- old long #s= links still open, and the address bar is cleaned ---
+ctxLabel = 'old-link';
+{
+  const token = Buffer.from(JSON.stringify({ presetName: 'Old long link', audio: { formulas: { fm: { enabled: true } } } })).toString('base64url');
+  const old = await context.newPage();
+  captureErrors(old, errors, () => 'old-link');
+  await openApp(old, `${app(BASE)}#s=${token}`);
+  check((await statusText(old)).includes('Old long link'), `old #s= link did not open: "${await statusText(old)}"`);
+  check((await old.evaluate(() => location.hash)) === '', 'old #s= link should be cleaned from the address bar');
+  await old.close();
+}
+
+// --- Worker unreachable → Share falls back to the long link ---
+ctxLabel = 'share-offline';
+{
+  const off = await context.newPage();
+  // The failed fetch logs "Failed to load resource" — expected here; any
+  // other console error still fails the smoke.
+  const offErrors = [];
+  captureErrors(off, offErrors, () => 'share-offline');
+  await openApp(off, withParam(withRes(BASE, RES), 'api', 'http://localhost:8799'));
+  await off.locator('#shareBtn').click();
+  await off.waitForFunction(() => (document.getElementById('status')?.textContent ?? '').includes('copied'), null, { timeout: 20000 }).catch(() => {});
+  check((await statusText(off)).includes('long link'), `offline share status: "${await statusText(off)}"`);
+  const longClip = await off.evaluate(() => navigator.clipboard.readText()).catch(() => '');
+  check(longClip.includes('#s='), 'offline share should copy the long #s= link');
+  errors.push(...offErrors.filter((e) => !/Failed to load resource|ERR_CONNECTION_REFUSED/.test(e)));
+  await off.close();
 }
 
 // --- stop audio ---
@@ -200,6 +266,7 @@ if (flags.has('screenshot')) {
 }
 
 await browser.close();
+await worker.stop();
 stop();
 
 if (errors.length) {

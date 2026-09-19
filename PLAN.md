@@ -149,10 +149,17 @@ src/genome/         genes (flat list of typed genes derived from schemas),
 src/coupling.ts     pure: audio features × coupling genes → visual offsets
 src/state/          AppState v1, tolerant sanitize, share token, user presets
 src/presets.ts      combined audio+image+mod+coupling presets
-src/analysis/       pure signal metrics used by scripts/analyze.mjs
+src/analysis/       pure signal metrics (fractality, clicks) used by
+                    scripts/analyze.mjs and the scout
+src/visualFx.ts     pure: explicit display effects (pulse, flash, tint,
+                    ripples) from audio features × coupling genes
+src/state/          + canonical (canonical JSON, content ids), launch (URL →
+                    what to open), cloud (points Worker client), lastPoint
 src/main.ts         wiring: engines, rAF loop, morphing, UI
-scripts/            smoke.mjs (Playwright), snap.mjs (screenshot),
-                    analyze.mjs (record + metrics)
+cloud/              Cloudflare Worker + D1 for short share links
+scripts/            smoke.mjs (Playwright, local Worker in Miniflare),
+                    snap.mjs (screenshot), analyze.mjs (offline render +
+                    metrics, --switch for preset-switch clicks)
 ```
 
 ### Genome

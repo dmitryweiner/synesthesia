@@ -23,9 +23,14 @@ you don't, and the search follows.
   through its bifurcation cascade and sweeps the reaction's Feed across
   the Pearson map, so spots→coral→maze in the picture coincide with the
   period-doubling in the sound.
-- **Live coupling.** Loudness, spectral brightness and onsets of the sound
-  push flow, gloss, hue and the light angle of the picture every frame.
-  How strongly is part of the genome, so it evolves too.
+- **The picture listens.** In the same frame the sound happens:
+  loudness *swells* breathe the exposure, every hit (a bell strike, a
+  drop) flashes the highlights and sprouts new growth in the pattern with a
+  ripple spreading from it, and bass / mid / treble tint the dark / mid /
+  light tones. Slower links nudge the simulation too (loudness → flow and
+  gloss, brightness → hue, onsets → light angle). How strongly each link
+  acts is part of the genome, so it evolves too — with a floor, so the link
+  never fades away.
 - **Directed search.**
   - 👍 **More of this** — the current point becomes the anchor; the next
     proposal continues along the step that led here, with a smaller spread.
@@ -43,14 +48,18 @@ you don't, and the search follows.
   Renders are 24 s at 8 kHz: about as cheap as 8 s at 16 kHz, but they rank
   candidates much closer to a full 30 s / 22 kHz render (Spearman ρ 0.73
   vs 0.23). Disable with `?scout=0`.
-- **Keep it / share it.** 💾 Save stores the point in your browser, 🔗 Share
-  copies a link. The URL always carries the current point (`#s=…`).
+- **Keep it / share it.** 💾 Save stores the point in your browser. 🔗 Share
+  stores it in a tiny cloud database and copies a short link
+  (`…/synesthesia/?presetId=cnG1Iacvvb`) — the same point always gets the
+  same link. The current point also survives a reload. Old long `#s=…`
+  links still open.
 
 Keys: ← 👎 · → 👍 · ↑ 🎲 · Backspace ↩ · Space ▶ sound.
 
-URL parameters: `?preset=N` opens built-in preset N, `?res=N` sets the
-simulation grid (default 1024, 512 on small screens), `?scout=0` turns
-the scout off.
+URL parameters: `?presetId=<id>` opens a shared point, `?preset=N` opens
+built-in preset N, `?res=N` sets the simulation grid (default 1024, 512 on
+small screens), `?scout=0` turns the scout off. (`?api=http://localhost:…`
+points Share at a local Worker — development only.)
 
 ## Development
 
@@ -66,6 +75,31 @@ npm run analyze        # fractality of every preset's actual sound
 
 `npm run smoke` and friends need a Playwright Chromium
 (`npx playwright install --with-deps chromium`), or set `CHROMIUM_PATH`.
+The smoke also runs the points Worker locally, so do `npm install` in
+`cloud/` once.
+
+### Short links (Cloudflare)
+
+`cloud/` is a Cloudflare Worker + D1 database (same setup as
+`../monitoring`), deployed at
+https://synesthesia-presets.dmitry-weiner.workers.dev:
+
+| route | |
+|---|---|
+| `POST /v1/points` | body = a point (≤ 16 KB) → `{ id }` (201 new, 200 already stored) |
+| `GET /v1/points/:id` | the point; immutable, cached for a year |
+| `GET /v1/health` | `{ ok: true }` |
+
+The Worker validates points with the app's own `sanitizeState` /
+`stateToAppState` (bundled from `src/`) and derives the id from the
+canonical JSON (`src/state/canonical.ts`): first 10 base62 characters of
+its SHA-256. Limits: 20 saves / min and 300 reads / min per IP, 5 000 new
+points a day, 500 000 in total.
+
+```bash
+npm run check:cloud    # worker type-check + Miniflare tests
+npm run deploy:cloud   # apply D1 migrations + wrangler deploy
+```
 
 ### Sound analysis
 
@@ -87,6 +121,7 @@ node scripts/analyze.mjs --preset 0 --mutants 8   # what 👍/👎 would propose
 node scripts/analyze.mjs --mutants 5 --configs 30@22050,8@16000
                                                   # how well a short render predicts a long one
 node scripts/analyze.mjs --preset 0 --wav shots/wav
+node scripts/analyze.mjs --switch 0,3,10,7 --at 12  # clicks at preset switches
 ```
 
 First results: built-in presets score 0.79 ± 0.14 against 0.55 ± 0.31 for

@@ -18,7 +18,10 @@ import { applyCoupling } from './coupling';
 import { RippleSet, displayCoupling } from './visualFx';
 import type { AppState } from './state/schema';
 import { cloneAppState, stateToAppState } from './state/schema';
-import { decodeStateToken, encodeStateToken, tokenFromHash } from './state/share';
+import { decodeStateToken, encodeStateToken } from './state/share';
+import { cleanUrl, parseLaunch, withPresetId } from './state/launch';
+import { fetchPoint, sharePoint } from './state/cloud';
+import { loadLastPoint, saveLastPoint } from './state/lastPoint';
 import { loadUserPresets, saveUserPresets, nextPresetNumber } from './state/userPresets';
 import type { UserPreset } from './state/userPresets';
 import { PRESETS, DEFAULT_PRESET_INDEX } from './presets';
@@ -104,6 +107,21 @@ for (const btn of document.querySelectorAll('button.tb-btn, button.fb-btn')) {
 
 // `?res=N` overrides the simulation grid (64..2048) — for weak devices and
 // for the headless scripts, where SwiftShader renders a few fps at 1024².
+// `?api=` points Share at a local points Worker (scripts/smoke.mjs runs one
+// in Miniflare). Only localhost is honored, so a crafted link can't send
+// people's points to someone else's server.
+function apiOverride(): string | undefined {
+  const raw = new URLSearchParams(location.search).get('api');
+  if (!raw) return undefined;
+  try {
+    const u = new URL(raw);
+    if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') return u.origin;
+  } catch {
+    // not a URL
+  }
+  return undefined;
+}
+
 function simResolution(): number {
   const q = Number(new URLSearchParams(location.search).get('res'));
   if (Number.isFinite(q) && q >= 64) return Math.min(2048, Math.round(q));
@@ -246,9 +264,11 @@ function boot(): void {
     return s;
   }
 
+  // The address bar no longer carries the point (PLAN.md decision 9): it is
+  // kept in localStorage instead, so a reload comes back to it.
   function onSettled(): void {
     if (!details.hidden) renderDetails(details, state, scout?.parent ?? null);
-    history.replaceState(null, '', `#s=${encodeStateToken(currentState())}`);
+    saveLastPoint(currentState());
     scheduleScout();
   }
 
@@ -317,6 +337,8 @@ function boot(): void {
   // --- actions -----------------------------------------------------------
   function afterAction(prev: Genome, seconds: number, pick: ScoutPick | null = null): void {
     stopScout();
+    // stepped away from whatever the URL pointed at (shared id / preset)
+    history.replaceState(null, '', cleanUrl(location.href));
     stepCount++;
     presetName = undefined;
     presetSel.value = '';
@@ -360,7 +382,8 @@ function boot(): void {
   }
 
   /** Load a whole point (preset / link): fresh search, image reseeded. */
-  function loadState(s: AppState, label: string): void {
+  function loadState(s: AppState, label: string, url: string = cleanUrl(location.href)): void {
+    history.replaceState(null, '', url);
     presetName = s.presetName;
     masterGain = s.audio.masterGain;
     volume.value = String(masterGain);
@@ -421,14 +444,47 @@ function boot(): void {
     onSettled();
   });
 
-  shareBtn.addEventListener('click', async () => {
-    const url = `${location.origin}${location.pathname}#s=${encodeStateToken(currentState())}`;
+  // 🔗 Share: store the point in the cloud and copy a short ?presetId= link;
+  // if the points Worker is unreachable, fall back to the long #s= link.
+  // The clipboard write is started synchronously with a promised payload
+  // (ClipboardItem) so Safari still treats it as part of the click.
+  const api = apiOverride();
+  async function shareLink(s: AppState): Promise<{ url: string; short: boolean }> {
     try {
-      await navigator.clipboard.writeText(url);
-      flash(shareBtn, '🔗 Copied');
+      const id = await sharePoint(s, { api });
+      const url = withPresetId(location.href, id);
+      history.replaceState(null, '', url);
+      return { url, short: true };
     } catch {
-      window.prompt('Copy this link:', url);
+      return { url: `${cleanUrl(location.href)}#s=${encodeStateToken(s)}`, short: false };
     }
+  }
+
+  shareBtn.addEventListener('click', async () => {
+    shareBtn.disabled = true;
+    const pending = shareLink(currentState());
+    let copied = false;
+    try {
+      if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+        const blob = pending.then((r) => new Blob([r.url], { type: 'text/plain' }));
+        await navigator.clipboard.write([new ClipboardItem({ 'text/plain': blob })]);
+        copied = true;
+      }
+    } catch {
+      // fall through to writeText / prompt
+    }
+    const { url, short } = await pending;
+    if (!copied) {
+      try {
+        await navigator.clipboard.writeText(url);
+        copied = true;
+      } catch {
+        window.prompt('Copy this link:', url);
+      }
+    }
+    shareBtn.disabled = false;
+    if (copied) flash(shareBtn, short ? '🔗 Copied' : '🔗 Copied (long)');
+    setStatus(short ? `short link copied: ${url}` : 'share server unreachable — copied a long link instead');
   });
 
   detailsBtn.addEventListener('click', () => {
@@ -568,17 +624,40 @@ function boot(): void {
 
   // --- boot ----------------------------------------------------------------
   refreshPresetList();
-  const token = tokenFromHash(location.hash);
-  const shared = token ? decodeStateToken(token) : null;
-  if (shared) {
-    loadState(stateToAppState(shared), 'opened link');
-  } else {
-    const presetParam = new URLSearchParams(location.search).get('preset');
-    const idx = presetParam !== null ? Number(presetParam) : NaN;
-    const p = PRESETS[idx] ?? PRESETS[DEFAULT_PRESET_INDEX];
-    loadState(cloneAppState(p.state), 'loaded');
-    presetSel.value = `b:${PRESETS.indexOf(p)}`;
+  // What to open: ?presetId= (cloud) > #s= (old long links) > ?preset=N >
+  // the last point (localStorage) > the default preset. See state/launch.ts.
+  function openFallback(url: string): void {
+    const last = loadLastPoint();
+    if (last) {
+      loadState(last, 'restored', url);
+      return;
+    }
+    const p = PRESETS[DEFAULT_PRESET_INDEX];
+    loadState(cloneAppState(p.state), 'loaded', url);
+    presetSel.value = `b:${DEFAULT_PRESET_INDEX}`;
   }
+
+  const launch = parseLaunch(location.href);
+  if (launch.kind === 'presetId') {
+    const { id } = launch;
+    openFallback(location.href); // something to look at while the point loads
+    setStatus(`opening shared point ${id}…`);
+    void fetchPoint(id, { api }).then((p) => {
+      if (p) loadState(stateToAppState(p), 'opened link', withPresetId(location.href, id));
+      else setStatus(`couldn't open shared point ${id} (offline, or the link is wrong)`);
+      document.body.dataset.launched = '1';
+    });
+  } else if (launch.kind === 'token') {
+    const shared = decodeStateToken(launch.token);
+    if (shared) loadState(stateToAppState(shared), 'opened link');
+    else openFallback(cleanUrl(location.href));
+  } else if (launch.kind === 'preset' && PRESETS[launch.index]) {
+    loadState(cloneAppState(PRESETS[launch.index].state), 'loaded');
+    presetSel.value = `b:${launch.index}`;
+  } else {
+    openFallback(cleanUrl(location.href));
+  }
+  if (launch.kind !== 'presetId') document.body.dataset.launched = '1';
   let helpShown = false;
   try { helpShown = localStorage.getItem(HELP_SHOWN_KEY) === '1'; } catch { /* private mode */ }
   if (!helpShown) openHelp();

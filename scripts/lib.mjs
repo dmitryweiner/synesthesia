@@ -1,7 +1,12 @@
 // Shared helpers for the Playwright scripts: dev/preview server lifecycle,
 // flag parsing, browser launch, console-error capture.
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium } from 'playwright';
+
+const CLOUD = fileURLToPath(new URL('../cloud/', import.meta.url));
 
 export function parseFlags(argv, valueFlags, repeatable = []) {
   const flags = new Map();
@@ -67,10 +72,49 @@ export async function openApp(page, url, { keepHelp = false } = {}) {
 
 /** Adds `?res=N` (simulation grid) to an app URL, keeping any query/hash. */
 export function withRes(url, res) {
-  if (!res) return url;
+  return withParam(url, 'res', res);
+}
+
+/** Sets one query parameter on a URL (no-op for an empty value), keeping the hash. */
+export function withParam(url, key, value) {
+  if (value === undefined || value === null || value === '' || value === 0) return url;
   const u = new URL(url);
-  u.searchParams.set('res', String(res));
+  u.searchParams.set(key, String(value));
   return u.toString();
+}
+
+/**
+ * Runs the points Worker (cloud/) locally in Miniflare with a fresh in-memory
+ * D1 — so scripts exercise Share/open-link end to end without writing into
+ * the production database. Needs `npm install` in cloud/ once.
+ */
+export async function startPointsWorker(port = 8787) {
+  if (!existsSync(`${CLOUD}node_modules/miniflare`)) {
+    throw new Error('cloud/node_modules missing — run `npm install` in cloud/ first');
+  }
+  execFileSync('npx', ['esbuild', 'src/index.ts', '--bundle', '--format=esm', '--platform=browser', '--outfile=dist/index.js', '--log-level=warning'], { cwd: CLOUD });
+  const require = createRequire(`${CLOUD}package.json`);
+  const { Miniflare, convertV4MiniflareOptions } = await import(pathToFileURL(require.resolve('miniflare')).href);
+  const mf = new Miniflare(convertV4MiniflareOptions({
+    modules: true,
+    script: readFileSync(`${CLOUD}dist/index.js`, 'utf8'),
+    compatibilityDate: '2026-09-01',
+    port,
+    bindings: { ALLOWED_ORIGINS: 'http://localhost:5173 http://localhost:4173' },
+    d1Databases: ['DB'],
+    ratelimits: {
+      SAVE_LIMIT: { namespace_id: '1', simple: { limit: 1000, period: 60 } },
+      READ_LIMIT: { namespace_id: '2', simple: { limit: 1000, period: 60 } },
+    },
+  }));
+  const url = await mf.ready;
+  const db = await mf.getD1Database('DB');
+  const sql = readFileSync(`${CLOUD}migrations/0001_initial.sql`, 'utf8');
+  for (const statement of sql.split('-- statement-breakpoint')) {
+    const st = statement.replace(/^\s*--.*$/gm, '').trim();
+    if (st) await db.prepare(st).run();
+  }
+  return { url: url.origin, db, stop: () => mf.dispose() };
 }
 
 export function captureErrors(page, errors, label = () => 'app') {

@@ -17,8 +17,11 @@ npm run smoke     # Playwright: boot, sound, 👍/👎/🎲/undo, every preset,
                   # The ONLY check of WebGL2/Web Audio (vitest can't load them)
 npm run snap -- --out shots/x.png [--preset N] [--sound] [--like N] [--dislike N]
                   [--details] [--help] [--res N] [--wait ms]
-npm run analyze   # fractality of the real sound (see "Sound analysis" below)
+npm run analyze   # fractality of the real sound (see "Sound analysis" below);
+                  # --switch 0,3,10 --at 12: clicks at preset switches
 npm run build     # tsc + vite build into ./docs (GitHub Pages) — commit docs/
+npm run check:cloud   # cloud/ Worker: tsc + Miniflare tests (npm install in cloud/ once)
+npm run deploy:cloud  # D1 migrations --remote + wrangler deploy (wrangler is authorized)
 ```
 
 TDD: tests first, then code. Commits are allowed at milestone granularity
@@ -36,12 +39,40 @@ TDD: tests first, then code. Commits are allowed at milestone granularity
   pages — a running `analyze.mjs` dies with "Execution context was
   destroyed". Don't edit sources while it runs.
 - `page.reload()` kills the AudioContext: re-start sound before checking it.
+- ~5 fps headless means most onsets fall between frames: live probes
+  undercount hits. The 60 fps truth is `tests/onsets.test.ts` (pure
+  AnalyserNode emulation over real preset audio).
+- localStorage is shared by all tabs of a context: the last point written by
+  one tab is what another tab's reload restores.
+
+## Cloud — short share links (PLAN.md #9)
+
+- Worker `synesthesia-presets` → https://synesthesia-presets.dmitry-weiner.workers.dev,
+  D1 `synesthesia-presets` (id 0a0f3551-69bb-4b0c-8e7f-7efe516a9535),
+  rate-limit namespaces 2001/2002, same account as ../monitoring. Resources
+  exist and the migration is applied — never recreate them.
+- `cloud/src/index.ts` imports `src/state/schema.ts` + `canonical.ts`: one
+  validation and one id function for app and server. Changing AppState
+  sanitization changes what the Worker accepts — redeploy after such changes.
+- Migration SQL: inside triggers write `SELECT (CASE … END);` — without the
+  parentheses wrangler's splitter takes `END;` for the end of the trigger
+  ("incomplete input").
+- npm 11 blocks the esbuild/workerd postinstall scripts; not needed — the
+  platform packages carry the binaries (Miniflare runs fine on aarch64).
+- `scripts/smoke.mjs` starts the Worker locally (`startPointsWorker()` in
+  lib.mjs, in-memory D1) and passes `?api=http://localhost:8787`; the app
+  honors `?api=` only for localhost. Never point scripts at production.
 
 ## Module map
 
 ```
-src/dsp/generator.ts   21 formulas, per-sample, pure (1:1 port); block-rate
-                       LFO modulation overwrite-then-restore in fill()
+src/dsp/generator.ts   21 formulas, per-sample, pure; block-rate LFO modulation
+                       overwrite-then-restore in fill(). EVERY oscillator
+                       accumulates phase (ph1..ph4, rissPhases): the ported
+                       sin(2π·f·t) jumped phase by 2π·Δf·t on any frequency
+                       change → harsh beating after minutes (user report,
+                       PLAN.md "Bugs"). gliss: log-frequency state, restarts
+                       after 4 octaves
 src/dsp/mod.ts         LFO (pure function of absolute time), effectiveParam(s).
                        ModRoute.target = 'fx' | formula id | visual card id —
                        the three namespaces never collide
@@ -50,11 +81,19 @@ src/worklet/processors.ts  AudioWorklet wrapper (loaded via ?worker&url)
 src/audio/engine.ts    AudioEngine: build(ctx) works on any BaseAudioContext;
                        start() = live AudioContext, renderOffline() = same graph
                        in an OfflineAudioContext with FX modulation scheduled
-                       ahead (setInterval can't drive offline time).
-                       applyFx() rebuilds routing only when the on/type/stage
-                       key changes; applyFxParams() always smooths
-                       (setTargetAtTime) because morphs push params at ~20 Hz
-src/audio/features.ts  analyser → loudness / brightness / onset in [0,1]
+                       ahead (setInterval can't drive offline time) and
+                       optional scheduled preset switches (ctx.suspend).
+                       switchTo(state) = hard switch: duck master, destroy +
+                       recreate FX nodes (no old tails), apply, fade in.
+                       Routing changes during morphs go behind a short master
+                       dip (rerouteSmoothly). applyFxParams() smooths, except
+                       right after a rebuild (freshParams)
+src/audio/features.ts  analyser → loudness, swell (vs ~4 s average), brightness,
+                       low/mid/high bands, onset envelope (adaptive: rise of 20
+                       log bands vs mean + 3·dev). Time-based smoothing (dt).
+                       OnsetDetector: envelope → discrete hits
+src/audio/analyserSim.ts  pure AnalyserNode emulation (Blackman, smoothing, dB →
+                       byte) — runs the live feature pipeline on offline audio
 src/audio/filters.ts, modrouting.ts  pure pieces of the engine (tested)
 src/schema/audio.ts    formula sliders (+ `exp` flag for octave mutation),
                        FxState, modulatable-FX allowlist/ranges/modules
@@ -66,15 +105,23 @@ src/sim/               SimEngine (WebGL2) + shaders + pure params; grid.ts
 src/palette.ts         5 cosine palettes (order = PALETTE_NAMES)
 src/state/schema.ts    AppState v1 {audio, visual, mod, coupling}; tolerant
                        sanitizeState + clamping stateToAppState; isModTarget
-src/state/share.ts     #s=base64url(JSON); userPresets.ts → localStorage
+src/state/share.ts     #s=base64url(JSON) — now only for old links and the
+                       offline Share fallback; userPresets.ts → localStorage
                        key synesthesia_user_presets_v1
+src/state/canonical.ts canonicalJson (sorted keys) + presetIdOf (SHA-256 →
+                       10 base62) — shared with the Worker
+src/state/launch.ts    parseLaunch: presetId > #s= > preset > none; cleanUrl
+                       keeps settings (res/scout/api), drops the point
+src/state/cloud.ts     sharePoint / fetchPoint (injectable fetch, timeout)
+src/state/lastPoint.ts synesthesia_last_point_v1 — restored on a plain reload
 src/genome/genes.ts    GENES derived from the schemas: cont (normalized 0..1,
                        exp → log scale) / bool / choice, gated by activeIf;
                        MOD_TARGETS; ROUTE_SLOTS = 12
 src/genome/codec.ts    AppState ⇄ Genome (masterGain/presetName aren't genes)
 src/genome/evolve.ts   pure: mutate (sparse gaussian + momentum + one weighted
                        structural move; never touches inactive genes), repair
-                       (1..5 formulas), randomGenome, lerpGenome (discrete genes
+                       (1..5 formulas + explicit-coupling floor Σ ≥ 1.2),
+                       randomGenome, lerpGenome (discrete genes
                        switch at t>0, but a closing gate stays open until t=1;
                        gated genes with `neutral` — formula gain, route depth,
                        FX wet mixes, flow/variation strengths — fade from/to
@@ -88,15 +135,22 @@ src/genome/scout.ts    background best-of-k (PLAN.md #7): renders parent + k
                        with analyzeSound, adjustedScore penalizes >6 dB quieter;
                        take() returns null for stale versions
 src/analysis/          fft.ts (radix-2), fractal.ts (spectralSlope, higuchiFD,
-                       boxCountDimension, analyzeSound, fractalScore)
-src/coupling.ts        pure: features × coupling genes → card param offsets
-                       (shift/lightAngle wrap, the rest clamp)
+                       boxCountDimension, analyzeSound, fractalScore),
+                       clicks.ts (median-relative HF click detector)
+src/coupling.ts        pure: features × card-coupling genes → card param offsets
+                       (shift/lightAngle wrap, the rest clamp); COUPLING_LABELS
+src/visualFx.ts        pure: explicit couplings (PLAN.md #8) → DisplayFx
+                       {exposure, flash, tint[3]}; RippleSet (≤4, 1.6 s).
+                       main.ts: OnsetDetector hit → sim.inject() + ripple
 src/presets.ts         12 presets = formula-synth sound × chromaflux material,
                        with cross-domain LFO routes and coupling
 src/ui/details.ts      read-only "what is this point" panel (+ fractality)
 src/main.ts            wiring only: explorer → 2 s eased genome morph →
                        engines; shared LFO clock (audio.time when sound runs);
-                       URL hash updated on settle; scout scheduled on settle
+                       settle → last point saved + scout scheduled; a step
+                       cleans the URL; loads use audio.switchTo; Share → short
+                       link (ClipboardItem with a promise, for Safari)
+cloud/                 Worker (src/index.ts), D1 migration, Miniflare tests
 scripts/lib.mjs        server lifecycle, launchBrowser (CHROMIUM_PATH, autoplay,
                        SwiftShader), openApp (readiness), withRes
 scripts/smoke.mjs      invariants only, never pixels; --mobile, --res, --screenshot
@@ -121,3 +175,6 @@ dimension of the loudest 20% of a 64-band log-frequency spectrogram.
   survive sanitize+clamp unchanged; ≥1 visual route or coupling).
 - Don't change GENES order casually: share links store AppState (not the
   genome), so they survive, but analysis JSON / tests assume stable ids.
+- Never write an oscillator as sin(2π·f·t) with absolute t —
+  tests/continuity.test.ts will catch it; accumulate phase.
+- Don't let scripts or tests write to the production Worker/D1.
