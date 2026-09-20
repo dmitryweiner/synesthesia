@@ -15,6 +15,13 @@
 //       # score every point under several render windows (secs@sr) and print
 //       # each window's Spearman rank correlation with the first one — how
 //       # well a cheap render (the in-app scout's) predicts the long one
+//   node scripts/analyze.mjs --onsets [--fps 60,30,15] [--secs 20]
+//       # how many onset hits each preset produces through the REAL graph
+//       # (the picture seeds growth + ripples on every hit) and how far the
+//       # loudness swell swings. Use it when tuning the detector in
+//       # src/audio/features.ts: struck/dripping presets should fire on
+//       # (nearly) every attack, drones almost never, and the counts must
+//       # not collapse at a low frame rate.
 //   node scripts/analyze.mjs --switch 0,3,10,7 [--at 20] [--wav shots/sw]
 //       # preset switches through the live applyState path: plays each preset
 //       # for --at seconds, then switches to the next; reports clicks
@@ -27,7 +34,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseFlags, ensureServer, launchBrowser, captureErrors, openApp } from './lib.mjs';
 
-const { flags } = parseFlags(process.argv.slice(2), ['preset', 'hash', 'secs', 'sr', 'mutants', 'random', 'wav', 'json', 'seed', 'configs', 'switch', 'at']);
+const { flags } = parseFlags(process.argv.slice(2), ['preset', 'hash', 'secs', 'sr', 'mutants', 'random', 'wav', 'json', 'seed', 'configs', 'switch', 'at', 'fps']);
 const SECS = Number(flags.get('secs') ?? 30);
 const SR = Number(flags.get('sr') ?? 22050);
 const MUTANTS = Number(flags.get('mutants') ?? 0);
@@ -40,35 +47,6 @@ const browser = await launchBrowser();
 const page = await browser.newPage();
 captureErrors(page, errors);
 await openApp(page, `${BASE}/?res=64`);
-
-if (flags.has('switch')) {
-  const order = flags.get('switch').split(',').map(Number);
-  const at = Number(flags.get('at') ?? 20);
-  const r = await page.evaluate(async ({ order, at, sr }) => {
-    const { AudioEngine } = await import('/src/audio/engine.ts');
-    const { PRESETS } = await import('/src/presets.ts');
-    const { detectClicks } = await import('/src/analysis/clicks.ts');
-    const eng = (s) => ({ masterGain: s.audio.masterGain, fx: s.audio.fx, formulas: s.audio.formulas, mod: s.mod });
-    const states = order.map((i) => PRESETS[i].state);
-    const switches = states.slice(1).map((s, k) => ({ t: at * (k + 1), state: eng(s) }));
-    const x = await AudioEngine.renderOffline(eng(states[0]), at * states.length, sr, switches);
-    return { clicks: detectClicks(x, sr), names: order.map((i) => PRESETS[i].name) };
-  }, { order, at, sr: SR });
-  const near = (t) => r.clicks.filter((c) => c >= t - 0.05 && c <= t + 0.6);
-  console.log(`switch chain: ${r.names.join(' → ')} (every ${at}s @ ${SR} Hz)`);
-  for (let k = 1; k < order.length; k++) {
-    console.log(`  at ${at * k}s  ${r.names[k - 1]} → ${r.names[k]}: ${near(at * k).length} click(s) ${JSON.stringify(near(at * k))}`);
-  }
-  const elsewhere = r.clicks.filter((c) => !order.slice(1).some((_, k) => c >= at * (k + 1) - 0.05 && c <= at * (k + 1) + 0.6));
-  console.log('  elsewhere (not at a switch) — per preset; struck/plucked presets have real attacks here:');
-  for (let k = 0; k < order.length; k++) {
-    const inSeg = elsewhere.filter((c) => c >= at * k && c < at * (k + 1));
-    console.log(`    ${r.names[k].padEnd(18)} ${String(inSeg.length).padStart(4)}  ${JSON.stringify(inSeg.slice(0, 8))}`);
-  }
-  await browser.close();
-  stop();
-  process.exit(errors.length ? 2 : 0);
-}
 
 // Build the candidate list in the page (the genome code is TypeScript).
 const candidates = await page.evaluate(async ({ presetArg, hash, mutants, random, seed }) => {
@@ -136,6 +114,69 @@ function spearman(a, b) {
   let num = 0, da = 0, db = 0;
   for (let i = 0; i < n; i++) { num += (ra[i] - ma) * (rb[i] - mb); da += (ra[i] - ma) ** 2; db += (rb[i] - mb) ** 2; }
   return num / Math.sqrt(da * db);
+}
+
+if (flags.has('onsets')) {
+  const fpsList = (flags.get('fps') ?? '60,30,15').split(',').map(Number);
+  console.log(`${pad('preset', 22)} ${fpsList.map((f) => pad(`${f}fps`, 8)).join('')} swell        (${SECS}s @ ${SR} Hz)`);
+  for (const c of candidates) {
+    const r = await page.evaluate(async ({ state, secs, sr, fpsList }) => {
+      const { AudioEngine } = await import('/src/audio/engine.ts');
+      const { simulateAnalyser } = await import('/src/audio/analyserSim.ts');
+      const { FeatureTracker, OnsetDetector } = await import('/src/audio/features.ts');
+      const x = await AudioEngine.renderOffline(
+        { masterGain: state.audio.masterGain, fx: state.audio.fx, formulas: state.audio.formulas, mod: state.mod },
+        secs, sr,
+      );
+      return fpsList.map((fps) => {
+        const tr = new FeatureTracker(sr);
+        const det = new OnsetDetector();
+        let hits = 0;
+        let lo = 1;
+        let hi = -1;
+        for (const f of simulateAnalyser(x, sr, { fps })) {
+          const feat = tr.update(f.timeDomain, f.bytes, 1 / fps);
+          if (det.update(feat.onset, f.t)) hits++;
+          if (f.t > 2) { lo = Math.min(lo, feat.swell); hi = Math.max(hi, feat.swell); }
+        }
+        return { fps, hits, lo, hi };
+      });
+    }, { state: c.state, secs: SECS, sr: SR, fpsList });
+    const swell = `${fmt(r[0].lo)}…${fmt(r[0].hi)}`;
+    console.log(`${pad(c.label, 22)} ${r.map((v) => pad(String(v.hits), 8)).join('')} ${swell}`);
+  }
+  await browser.close();
+  stop();
+  process.exit(errors.length ? 2 : 0);
+}
+
+if (flags.has('switch')) {
+  const order = flags.get('switch').split(',').map(Number);
+  const at = Number(flags.get('at') ?? 20);
+  const r = await page.evaluate(async ({ order, at, sr }) => {
+    const { AudioEngine } = await import('/src/audio/engine.ts');
+    const { PRESETS } = await import('/src/presets.ts');
+    const { detectClicks } = await import('/src/analysis/clicks.ts');
+    const eng = (s) => ({ masterGain: s.audio.masterGain, fx: s.audio.fx, formulas: s.audio.formulas, mod: s.mod });
+    const states = order.map((i) => PRESETS[i].state);
+    const switches = states.slice(1).map((s, k) => ({ t: at * (k + 1), state: eng(s) }));
+    const x = await AudioEngine.renderOffline(eng(states[0]), at * states.length, sr, switches);
+    return { clicks: detectClicks(x, sr), names: order.map((i) => PRESETS[i].name) };
+  }, { order, at, sr: SR });
+  const near = (t) => r.clicks.filter((c) => c >= t - 0.05 && c <= t + 0.6);
+  console.log(`switch chain: ${r.names.join(' → ')} (every ${at}s @ ${SR} Hz)`);
+  for (let k = 1; k < order.length; k++) {
+    console.log(`  at ${at * k}s  ${r.names[k - 1]} → ${r.names[k]}: ${near(at * k).length} click(s) ${JSON.stringify(near(at * k))}`);
+  }
+  const elsewhere = r.clicks.filter((c) => !order.slice(1).some((_, k) => c >= at * (k + 1) - 0.05 && c <= at * (k + 1) + 0.6));
+  console.log('  elsewhere (not at a switch) — per preset; struck/plucked presets have real attacks here:');
+  for (let k = 0; k < order.length; k++) {
+    const inSeg = elsewhere.filter((c) => c >= at * k && c < at * (k + 1));
+    console.log(`    ${r.names[k].padEnd(18)} ${String(inSeg.length).padStart(4)}  ${JSON.stringify(inSeg.slice(0, 8))}`);
+  }
+  await browser.close();
+  stop();
+  process.exit(errors.length ? 2 : 0);
 }
 
 if (flags.has('configs')) {

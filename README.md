@@ -122,6 +122,7 @@ node scripts/analyze.mjs --mutants 5 --configs 30@22050,8@16000
                                                   # how well a short render predicts a long one
 node scripts/analyze.mjs --preset 0 --wav shots/wav
 node scripts/analyze.mjs --switch 0,3,10,7 --at 12  # clicks at preset switches
+node scripts/analyze.mjs --onsets                  # onset hits per preset at 60/30/15 fps
 ```
 
 First results: built-in presets score 0.79 ± 0.14 against 0.55 ± 0.31 for
