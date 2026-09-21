@@ -29,6 +29,7 @@ const FX_LABEL: Record<(typeof FX_ON_KEYS)[number], string> = {
   filterOn: 'Filter', chorusOn: 'Chorus', reverbOn: 'Reverb', limiterOn: 'Limiter', delayOn: 'Delay', phaserOn: 'Phaser',
 };
 
+/** Fills the details panel's body (the panel itself keeps its close button). */
 export function renderDetails(root: HTMLElement, state: AppState, analysis: SoundAnalysis | null = null): void {
   root.replaceChildren();
 

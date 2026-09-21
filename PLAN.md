@@ -131,6 +131,25 @@ starting points of every exploration.
   applied at once and fades in (~150 ms). Morph-time FX re-routing is done
   behind a short master dip.
 
+## UI fixes after user testing (2026-09-21)
+
+- **A saved point looked like it wasn't saved.** Saving while a built-in
+  preset was selected suggested that preset's own name, so the copy showed up
+  as e.g. "Molten Polivoks" inside *My points* — twelve rows below the
+  identical built-in entry. Now: saved points are listed **first**, prefixed
+  with 💾 and without an index; the suggested name is a fresh "Point N"
+  unless you are overwriting one of your own points
+  (`suggestPointName`); saving confirms in the status line.
+- **Popups could only be closed from the toolbar.** The details panel got its
+  own ✕ (and Escape closes it); the help dialog got a ✕ next to "Got it".
+- **The help dialog didn't fit small phones**, which left no way to close it:
+  it is now a flex column capped at 86vh with the text in a scrollable area
+  and the button pinned below.
+- **Phones dimmed the screen while watching.** Screen Wake Lock
+  (`src/ui/wakelock.ts`, ported from formula-synth) is taken on the first
+  gesture and re-taken when the tab becomes visible again; it degrades
+  silently where the API is missing or refused.
+
 ## Architecture
 
 ```

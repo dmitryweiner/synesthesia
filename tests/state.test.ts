@@ -7,7 +7,7 @@ import { FORMULA_IDS } from '../src/dsp/generator';
 import { CARDS } from '../src/schema/visual';
 import { DEFAULT_FX } from '../src/schema/audio';
 import { b64urlDecode, b64urlEncode, decodeStateToken, encodeStateToken, tokenFromHash } from '../src/state/share';
-import { loadUserPresets, saveUserPresets, nextPresetNumber, USER_PRESETS_KEY } from '../src/state/userPresets';
+import { loadUserPresets, saveUserPresets, nextPresetNumber, suggestPointName, USER_PRESETS_KEY } from '../src/state/userPresets';
 
 describe('defaultAppState', () => {
   it('has every formula (disabled, UI defaults), every card, 4 idle LFOs, zero coupling', () => {
@@ -192,6 +192,14 @@ describe('userPresets (localStorage)', () => {
 
   it('nextPresetNumber', () => {
     expect(nextPresetNumber([])).toBe(1);
-    expect(nextPresetNumber([{ name: 'Preset 3', state: defaultAppState() }, { name: 'x', state: defaultAppState() }])).toBe(4);
+    expect(nextPresetNumber([{ name: 'Point 3', state: defaultAppState() }, { name: 'x', state: defaultAppState() }])).toBe(4);
+  });
+
+  it('suggestPointName never proposes a built-in name (a saved copy would look identical in the list)', () => {
+    const mine = [{ name: 'My thing', state: defaultAppState() }, { name: 'Point 1', state: defaultAppState() }];
+    expect(suggestPointName(undefined, [])).toBe('Point 1');
+    expect(suggestPointName('Molten Polivoks', mine)).toBe('Point 2'); // built-in name → a fresh one
+    expect(suggestPointName('My thing', mine)).toBe('My thing');       // own point → offer to overwrite
+    expect(suggestPointName(undefined, mine)).toBe('Point 2');
   });
 });

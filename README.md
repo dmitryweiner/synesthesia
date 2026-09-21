@@ -48,7 +48,8 @@ you don't, and the search follows.
   Renders are 24 s at 8 kHz: about as cheap as 8 s at 16 kHz, but they rank
   candidates much closer to a full 30 s / 22 kHz render (Spearman ρ 0.73
   vs 0.23). Disable with `?scout=0`.
-- **Keep it / share it.** 💾 Save stores the point in your browser. 🔗 Share
+- **Keep it / share it.** 💾 Save stores the point in your browser (saved
+  points sit at the top of the dropdown under *My points*). 🔗 Share
   stores it in a tiny cloud database and copies a short link
   (`…/synesthesia/?presetId=cnG1Iacvvb`) — the same point always gets the
   same link. The current point also survives a reload. Old long `#s=…`

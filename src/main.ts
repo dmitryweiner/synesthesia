@@ -22,7 +22,8 @@ import { decodeStateToken, encodeStateToken } from './state/share';
 import { cleanUrl, parseLaunch, withPresetId } from './state/launch';
 import { fetchPoint, sharePoint } from './state/cloud';
 import { loadLastPoint, saveLastPoint } from './state/lastPoint';
-import { loadUserPresets, saveUserPresets, nextPresetNumber } from './state/userPresets';
+import { loadUserPresets, saveUserPresets, suggestPointName } from './state/userPresets';
+import { keepScreenAwake } from './ui/wakelock';
 import type { UserPreset } from './state/userPresets';
 import { PRESETS, DEFAULT_PRESET_INDEX } from './presets';
 import { decodeGenome, encodeGenome } from './genome/codec';
@@ -64,6 +65,9 @@ const detailsBtn = el('detailsBtn', HTMLButtonElement);
 const helpBtn = el('helpBtn', HTMLButtonElement);
 const helpBox = el('help', HTMLDivElement);
 const helpCloseBtn = el('helpCloseBtn', HTMLButtonElement);
+const helpCloseX = el('helpCloseX', HTMLButtonElement);
+const detailsBody = el('detailsBody', HTMLDivElement);
+const detailsCloseBtn = el('detailsCloseBtn', HTMLButtonElement);
 const likeBtn = el('likeBtn', HTMLButtonElement);
 const dislikeBtn = el('dislikeBtn', HTMLButtonElement);
 const surpriseBtn = el('surpriseBtn', HTMLButtonElement);
@@ -267,7 +271,7 @@ function boot(): void {
   // The address bar no longer carries the point (PLAN.md decision 9): it is
   // kept in localStorage instead, so a reload comes back to it.
   function onSettled(): void {
-    if (!details.hidden) renderDetails(details, state, scout?.parent ?? null);
+    if (!details.hidden) renderDetails(detailsBody, state, scout?.parent ?? null);
     saveLastPoint(currentState());
     scheduleScout();
   }
@@ -283,7 +287,7 @@ function boot(): void {
       analyze: (x) => analyzeSound(x, SCOUT_SR),
       onProgress: () => {
         document.body.dataset.scout = `${scout?.ready('like') ?? 0}/${scout?.ready('dislike') ?? 0}`;
-        if (!details.hidden) renderDetails(details, state, scout?.parent ?? null);
+        if (!details.hidden) renderDetails(detailsBody, state, scout?.parent ?? null);
       },
     })
     : null;
@@ -313,6 +317,18 @@ function boot(): void {
     const placeholder = make('option', undefined, '— point —');
     placeholder.value = '';
     presetSel.appendChild(placeholder);
+    // Saved points first: a point saved a second ago must be visible without
+    // scrolling past a dozen built-ins (users read that as "it didn't save").
+    if (userPresets.length > 0) {
+      const mine = make('optgroup');
+      mine.label = 'My points';
+      userPresets.forEach((p, i) => {
+        const o = make('option', undefined, `💾 ${p.name}`);
+        o.value = `u:${i}`;
+        mine.appendChild(o);
+      });
+      presetSel.appendChild(mine);
+    }
     const builtin = make('optgroup');
     builtin.label = 'Built-in';
     PRESETS.forEach((p, i) => {
@@ -321,16 +337,6 @@ function boot(): void {
       builtin.appendChild(o);
     });
     presetSel.appendChild(builtin);
-    if (userPresets.length > 0) {
-      const mine = make('optgroup');
-      mine.label = 'My points';
-      userPresets.forEach((p, i) => {
-        const o = make('option', undefined, `${i}: ${p.name}`);
-        o.value = `u:${i}`;
-        mine.appendChild(o);
-      });
-      presetSel.appendChild(mine);
-    }
     presetSel.value = '';
   }
 
@@ -407,6 +413,18 @@ function boot(): void {
     onSettled();
   }
 
+  // Phones dim the screen while you watch: take a wake lock on the first
+  // gesture (that's when browsers grant it) and re-take it after the tab was
+  // hidden — see ui/wakelock.ts.
+  function stayAwake(): void {
+    void keepScreenAwake().then((ok) => {
+      if (ok) document.body.dataset.awake = '1';
+    });
+  }
+  for (const ev of ['pointerdown', 'keydown']) {
+    document.addEventListener(ev, stayAwake, { once: true });
+  }
+
   likeBtn.addEventListener('click', like);
   dislikeBtn.addEventListener('click', dislike);
   surpriseBtn.addEventListener('click', surprise);
@@ -427,7 +445,7 @@ function boot(): void {
   });
 
   saveBtn.addEventListener('click', () => {
-    const suggested = presetName ?? `Preset ${nextPresetNumber(userPresets)}`;
+    const suggested = suggestPointName(presetName, userPresets);
     const name = window.prompt('Name this point:', suggested);
     if (name === null) return;
     const s = currentState();
@@ -441,6 +459,7 @@ function boot(): void {
     refreshPresetList();
     presetSel.value = `u:${userPresets.findIndex((p) => p.name === s.presetName)}`;
     flash(saveBtn, '💾 Saved');
+    setStatus(`saved as “${s.presetName}” — it's at the top of the list, under “My points”`);
     onSettled();
   });
 
@@ -487,10 +506,14 @@ function boot(): void {
     setStatus(short ? `short link copied: ${url}` : 'share server unreachable — copied a long link instead');
   });
 
+  function closeDetails(): void {
+    details.hidden = true;
+  }
   detailsBtn.addEventListener('click', () => {
     details.hidden = !details.hidden;
-    if (!details.hidden) renderDetails(details, state, scout?.parent ?? null);
+    if (!details.hidden) renderDetails(detailsBody, state, scout?.parent ?? null);
   });
+  detailsCloseBtn.addEventListener('click', closeDetails);
 
   function openHelp(): void { helpBox.hidden = false; }
   function closeHelp(): void {
@@ -499,6 +522,7 @@ function boot(): void {
   }
   helpBtn.addEventListener('click', openHelp);
   helpCloseBtn.addEventListener('click', closeHelp);
+  helpCloseX.addEventListener('click', closeHelp);
   helpBox.addEventListener('click', (e) => { if (e.target === helpBox) closeHelp(); });
 
   // --- audio -------------------------------------------------------------
@@ -549,6 +573,7 @@ function boot(): void {
   document.addEventListener('keydown', (e) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
     if (!helpBox.hidden) { if (e.key === 'Escape' || e.key === 'Enter') closeHelp(); return; }
+    if (e.key === 'Escape' && !details.hidden) { closeDetails(); return; }
     switch (e.key) {
       case 'ArrowRight': like(); break;
       case 'ArrowLeft': dislike(); break;

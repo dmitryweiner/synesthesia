@@ -38,6 +38,9 @@ const context = await browser.newContext({
   viewport: flags.has('mobile') ? { width: 390, height: 844 } : { width: 1280, height: 820 },
   permissions: ['clipboard-read', 'clipboard-write'],
 });
+// Wake lock is refused in headless unless the permission is granted; when it
+// is, the app must actually take one (phones dim the screen otherwise).
+const wakeGrantable = await context.grantPermissions(['screen-wake-lock']).then(() => true).catch(() => false);
 const page = await context.newPage();
 captureErrors(page, errors, () => ctxLabel);
 
@@ -51,8 +54,27 @@ const MORPH_WAIT = 2400; // > MORPH_SECONDS in main.ts
 
 await openApp(page, app(BASE), { keepHelp: true });
 check(await page.locator('#help').isVisible(), 'help dialog should open on first visit');
+// the whole dialog, and its close button, must fit on screen (small phones)
+{
+  const vp = page.viewportSize();
+  const box = await page.locator('#helpBox').boundingBox();
+  const btn = await page.locator('#helpCloseBtn').boundingBox();
+  check(box && box.y >= 0 && box.y + box.height <= vp.height + 1, `help dialog does not fit: ${JSON.stringify(box)} in ${vp.height}px`);
+  check(btn && btn.y + btn.height <= vp.height + 1, `help "Got it" button is off screen: ${JSON.stringify(btn)}`);
+  const scrolls = await page.locator('#helpContent').evaluate((n) => n.scrollHeight > n.clientHeight + 1 || getComputedStyle(n).overflowY === 'auto');
+  check(scrolls, 'help text should live in a scrollable area');
+}
+await page.keyboard.press('Escape');
+check(await page.locator('#help').isHidden(), 'Escape should close the help dialog');
+await page.locator('#helpBtn').click();
 await page.locator('#helpCloseBtn').click();
 check((await statusText()).includes('Fractal garden'), 'default preset is not Fractal garden');
+if (wakeGrantable) {
+  ctxLabel = 'wakelock';
+  await page.waitForFunction(() => document.body.dataset.awake === '1', null, { timeout: 5000 }).catch(() => {});
+  check(await page.evaluate(() => document.body.dataset.awake === '1'), 'the screen wake lock was not taken after a gesture');
+  ctxLabel = 'boot';
+}
 check((await hashOf()) === '', 'the address bar must not carry the point (#s=)');
 check(!!(await lastPoint()), 'the current point is not kept in localStorage');
 check(await page.locator('#webglError').isHidden(), 'WebGL error shown');
@@ -128,7 +150,11 @@ await page.locator('#detailsBtn').click();
 await page.waitForTimeout(200);
 check(await page.locator('#details').isVisible(), 'details panel not visible');
 check((await page.locator('#details h3').count()) >= 5, 'details sections missing');
-await page.locator('#detailsBtn').click();
+// it must be closable from the panel itself, not only from the toolbar
+check(await page.locator('#detailsCloseBtn').isVisible(), 'details panel needs its own close button');
+await page.locator('#detailsCloseBtn').click();
+await page.waitForTimeout(150);
+check(await page.locator('#details').isHidden(), 'the close button should close the details panel');
 
 // --- every built-in preset loads (sound running) ---
 const values = await page.$$eval('#presetSel option', (els) => els.map((o) => o.value).filter((v) => v.startsWith('b:')));
@@ -153,11 +179,34 @@ await qp.close();
 
 // --- save a point, reload, load it back ---
 ctxLabel = 'save';
-page.once('dialog', (d) => d.accept('Smoke point'));
+// the suggested name must not be a built-in preset's name (a saved copy that
+// looks exactly like the built-in reads as "nothing was saved")
+await page.selectOption('#presetSel', 'b:3');
+await page.waitForTimeout(600);
+const builtinName = (await page.$eval('#presetSel option[value="b:3"]', (o) => o.textContent ?? '')).replace(/^\d+: /, '');
+let suggestedName = '';
+page.once('dialog', (d) => { suggestedName = d.defaultValue(); d.accept('Smoke point'); });
 await page.locator('#saveBtn').click();
 await page.waitForTimeout(300);
-const userOpts = await page.$$eval('#presetSel option', (els) => els.map((o) => o.value).filter((v) => v.startsWith('u:')));
-check(userOpts.length === 1, 'saved point missing from the list');
+const saved = await page.evaluate(() => {
+  const sel = document.getElementById('presetSel');
+  const groups = [...sel.querySelectorAll('optgroup')].map((g) => g.label);
+  const opts = [...sel.querySelectorAll('option')].map((o) => o.value);
+  return {
+    groups,
+    userOpts: opts.filter((v) => v.startsWith('u:')),
+    firstUserIndex: opts.indexOf('u:0'),
+    firstBuiltinIndex: opts.indexOf('b:0'),
+    selectedText: sel.selectedOptions[0]?.textContent ?? '',
+  };
+});
+check(saved.userOpts.length === 1, 'saved point missing from the list');
+check(suggestedName !== builtinName, `suggested name duplicates the built-in "${builtinName}"`);
+// saved points come first: a fresh save must be visible without scrolling
+check(saved.firstUserIndex >= 0 && saved.firstUserIndex < saved.firstBuiltinIndex, `saved points should be listed above the built-ins: ${JSON.stringify(saved)}`);
+check(saved.groups[0] === 'My points', `first group should be "My points", got ${JSON.stringify(saved.groups)}`);
+check(saved.selectedText.includes('Smoke point'), `the saved point should be selected: "${saved.selectedText}"`);
+check((await statusText()).includes('Smoke point'), `save should confirm in the status line: "${await statusText()}"`);
 const beforeReload = await lastPoint();
 await page.reload();
 await page.waitForSelector('body[data-ready="1"]', { timeout: 30000 });

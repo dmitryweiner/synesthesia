@@ -6,8 +6,8 @@
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <meta name="theme-color" content="#0d1117" />
     <title>Synesthesia — sound &amp; image, steered by you</title>
-    <script type="module" crossorigin src="./assets/index-D89_b4bP.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-D6K3dXd5.css">
+    <script type="module" crossorigin src="./assets/index-BFc2Qd1B.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-Cih2lUlb.css">
   </head>
   <body>
     <div id="app">
@@ -29,7 +29,10 @@
         <p id="webglError" hidden>
           WebGL2 (with EXT_color_buffer_float) is required. Please use an up-to-date desktop or mobile browser.
         </p>
-        <aside id="details" hidden></aside>
+        <aside id="details" hidden>
+          <button id="detailsCloseBtn" class="panel-close" type="button" title="Close (Esc)" aria-label="Close">✕</button>
+          <div id="detailsBody"></div>
+        </aside>
         <div id="hud">
           <p id="status"></p>
           <div id="feedback">
@@ -40,6 +43,8 @@
         </div>
         <div id="help" hidden>
           <div id="helpBox">
+            <button id="helpCloseX" class="panel-close" type="button" title="Close (Esc)" aria-label="Close">✕</button>
+            <div id="helpContent">
             <h2>Synesthesia</h2>
             <p>One point in a big parameter space makes both the sound and the picture. You steer the search:</p>
             <ul>
@@ -51,6 +56,7 @@
             </ul>
             <p>Sound and image share the same slow LFOs, and the picture listens: it breathes with loudness swells, flashes and sprouts new growth (with a ripple) on every hit, and bass / mid / treble tint its dark / mid / light tones. Press <b>▶ Sound</b> to start audio (browsers need a click for that).</p>
             <p>Keys: ← 👎 · → 👍 · ↑ 🎲 · Backspace ↩ · Space ▶</p>
+            </div>
             <button id="helpCloseBtn" class="tb-btn primary">Got it</button>
           </div>
         </div>

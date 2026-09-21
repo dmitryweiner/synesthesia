@@ -224,6 +224,31 @@ body {
   border-width: 3px;
 }
 
+/* Close button in the corner of a floating panel (details, help) — every
+   popup must be closable from the popup itself, not only from the toolbar. */
+.panel-close {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--muted);
+  background: var(--card);
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  cursor: pointer;
+  z-index: 1;
+}
+
+.panel-close:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
 #details {
   position: absolute;
   top: 12px;
@@ -252,6 +277,11 @@ body {
   margin-top: 0;
 }
 
+/* room for the ✕ so it never covers the first heading */
+#detailsBody {
+  padding-right: 28px;
+}
+
 #details ul {
   margin: 0;
   padding-left: 16px;
@@ -276,13 +306,33 @@ body {
   z-index: 30;
 }
 
+/* The dialog never grows past the viewport: the text scrolls inside and the
+   button stays reachable (small phones showed neither). */
 #helpBox {
-  width: min(520px, calc(100% - 32px));
-  padding: 20px 24px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(520px, calc(100% - 24px));
+  max-height: min(86vh, 86dvh);
+  padding: 18px 20px;
   border-radius: 12px;
   background: var(--panel);
   border: 1px solid #30363d;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+}
+
+#helpContent {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 4px;
+  margin-bottom: 12px;
+}
+
+#helpBox .tb-btn {
+  flex: none;
+  align-self: stretch;
+  height: 40px;
 }
 
 #helpBox h2 {
@@ -337,5 +387,17 @@ body {
     top: auto;
     bottom: 84px;
     max-height: 50%;
+  }
+
+  #helpBox {
+    padding: 14px 16px;
+  }
+
+  #helpBox h2 {
+    font-size: 19px;
+  }
+
+  #helpContent {
+    font-size: 13.5px;
   }
 }

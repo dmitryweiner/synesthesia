@@ -77,6 +77,12 @@ Corollaries:
   parsed values rounded to ~9 significant digits, never JSON strings.
 - **localStorage is shared by every tab** of a browser context: one tab's
   last point is what another tab's reload restores.
+- **Wake lock is refused in headless** (`NotAllowedError`) unless the context
+  grants `screen-wake-lock`; the smoke grants it and then asserts
+  `body[data-awake]`.
+- **Popups must be closable from themselves** (✕ on the panel, Escape), and
+  must fit a 390×560 screen — a dialog taller than the viewport hides its own
+  button. The smoke measures both.
 - **Long analysis runs die when you edit `src/`** (Vite full-reloads the
   page). Run them against a snapshot on another port instead:
   `rsync -a --exclude node_modules --exclude docs --exclude shots --exclude .git ./ $SNAP/`,
@@ -200,7 +206,11 @@ src/visualFx.ts        pure: explicit couplings (PLAN.md #8) → DisplayFx
                        main.ts: OnsetDetector hit → sim.inject() + ripple
 src/presets.ts         12 presets = formula-synth sound × chromaflux material,
                        with cross-domain LFO routes and coupling
-src/ui/details.ts      read-only "what is this point" panel (+ fractality)
+src/ui/details.ts      read-only "what is this point" panel (+ fractality);
+                       renders into #detailsBody — the panel's own ✕ lives
+                       outside it, so a re-render can't wipe it
+src/ui/wakelock.ts     screen wake lock: taken on the first gesture, re-taken
+                       when the tab is visible again (phones dim otherwise)
 src/main.ts            wiring only: explorer → 2 s eased genome morph →
                        engines; shared LFO clock (audio.time when sound runs);
                        settle → last point saved + scout scheduled; a step
