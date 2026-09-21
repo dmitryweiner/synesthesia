@@ -85,8 +85,9 @@ Corollaries:
   button. The smoke measures both.
 - **The phone toolbar is two rows by design** (Sound + point name, then the
   icons): flex `order` + a `#topbar::after` line break. Adding another
-  always-visible button squeezes the `<select>` to an unreadable stub —
-  measure `#presetSel` width at 390 px after touching the toolbar.
+  always-visible button squeezes the name to an unreadable stub — measure
+  `#pointsBtn` width at 390 px after touching the toolbar, and remember
+  `#topbar > button:not(#audioBtn)` outweighs a plain `#id` rule.
 - **Long analysis runs die when you edit `src/`** (Vite full-reloads the
   page). Run them against a snapshot on another port instead:
   `rsync -a --exclude node_modules --exclude docs --exclude shots --exclude .git ./ $SNAP/`,
@@ -172,8 +173,13 @@ src/palette.ts         5 cosine palettes (order = PALETTE_NAMES)
 src/state/schema.ts    AppState v1 {audio, visual, mod, coupling}; tolerant
                        sanitizeState + clamping stateToAppState; isModTarget
 src/state/share.ts     #s=base64url(JSON) — now only for old links and the
-                       offline Share fallback; userPresets.ts → localStorage
-                       key synesthesia_user_presets_v1
+                       offline Share fallback
+src/state/store.ts     localStorage with read-back: {ok} | {full|blocked}
+src/state/library.ts   "My points" = [{id, name}] (synesthesia_library_v1);
+                       the point itself lives in the points database
+src/state/migrate.ts   old whole-point key → library, losing nothing
+src/ui/pointList.ts    the points panel (a <select> can't hold a per-row 🗑)
+src/ui/askDialog.ts    prompt/confirm — never the native ones (suppressible)
 src/state/canonical.ts canonicalJson (sorted keys) + presetIdOf (SHA-256 →
                        10 base62) — shared with the Worker
 src/state/launch.ts    parseLaunch: presetId > #s= > preset > none; cleanUrl
@@ -253,5 +259,9 @@ dimension of the loudest 20% of a 64-band log-frequency spectrogram.
   silently does nothing. Use `src/ui/askDialog.ts` (the smoke fails on any
   native dialog).
 - Never let a `localStorage` write fail in silence — the quota is shared by
-  every app on the origin. Write through `saveUserPresets`-style helpers
-  that read back what they wrote and report `full` / `blocked` to the user.
+  every app on the origin (all of dmitryweiner.github.io). Write through
+  `state/store.ts`, which reads back what it wrote and reports
+  `full` / `blocked`, and keep what is stored small: points live in the
+  points database, the browser keeps `{ id, name }` (PLAN.md decision 10).
+- Don't put app state in a `<select>` that needs per-row controls: a phone
+  renders it as a system sheet. The points list is `src/ui/pointList.ts`.

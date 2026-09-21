@@ -13,8 +13,7 @@
         <span id="brand">Synesthesia</span>
         <button id="audioBtn" class="tb-btn primary" title="Start / stop sound (Space)">▶ Sound</button>
         <label id="volLab" title="Volume">🔊<input id="volume" type="range" min="0" max="1" step="0.01" value="0.75" /></label>
-        <select id="presetSel" title="Built-in and saved points"></select>
-        <button id="deleteBtn" class="tb-btn" title="Delete the selected saved point" disabled hidden>🗑 Delete</button>
+        <button id="pointsBtn" class="tb-btn points-btn" title="Built-in and saved points">— point —</button>
         <button id="undoBtn" class="tb-btn" title="Undo the last change (Backspace)" disabled>↩ Undo</button>
         <button id="reseedBtn" class="tb-btn" title="Restart the image pattern from fresh seeds">🌱 Reseed</button>
         <span class="tb-spacer"></span>
@@ -38,6 +37,13 @@
             <button id="dislikeBtn" class="fb-btn dislike" title="Go back and try something else (←)">👎 Not this</button>
             <button id="surpriseBtn" class="fb-btn surprise" title="Jump somewhere new (↑)">🎲 Surprise</button>
             <button id="likeBtn" class="fb-btn like" title="More of this (→)">👍 More of this</button>
+          </div>
+        </div>
+        <div id="points" hidden>
+          <div id="pointsBox">
+            <button id="pointsCloseX" class="panel-close" type="button" title="Close (Esc)" aria-label="Close">✕</button>
+            <h2 id="pointsTitle">Points</h2>
+            <div id="pointsList"></div>
           </div>
         </div>
         <div id="help" hidden>

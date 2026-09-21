@@ -189,6 +189,36 @@ can refuse a save were both removed instead of guessing:
   long-open tab, which cost most of the diagnosis; now a screenshot says
   which build it is.
 
+## Decisions after user testing (agreed with the user, 2026-09-21)
+
+10. **Saved points live in the points database; the browser keeps only
+    names and ids.** Proposed by the user after hitting "storage is full"
+    on a phone. 💾 Save now POSTs the point exactly like 🔗 Share does
+    (content-addressed, anonymous, immutable) and stores
+    `[{ id, name }]` under `synesthesia_library_v1` — **37 bytes** against
+    the **4.4 KB** a whole point took, on a quota that is shared by every
+    app on the origin. Consequences, all accepted deliberately:
+    - Opening one of your points needs the network; the status line says so
+      when it isn't there. Saving does too: no network, no save — and it
+      says that instead of pretending.
+    - Points saved by older builds are uploaded on the first boot that can
+      reach the server, then the old key is dropped — which is also what
+      frees a full quota. Anything that fails to upload stays put and is
+      retried next time; nothing is ever deleted before its replacement is
+      stored (`src/state/migrate.ts`, `tests/migrate.test.ts`).
+    - If even the short list can't be written, the point is still on the
+      server, so the status line hands over its link.
+    - 🗑 removes a point from *your list*; the point itself stays in the
+      database, so links you shared keep working.
+    - Rejected: a panel showing what fills the origin's quota (the other
+      apps on dmitryweiner.github.io). The message is enough now that our
+      own footprint is ~37 bytes per point.
+11. **The points list is the app's own panel, not a `<select>`.** A phone
+    renders `<select>` options as a system sheet, which cannot hold a 🗑
+    next to a row — deleting a point was nowhere near the list of points.
+    The panel (`src/ui/pointList.ts`) shows *My points* with a 🗑 on each
+    row, then the built-ins, and the toolbar button shows what is playing.
+
 ## Architecture
 
 ```

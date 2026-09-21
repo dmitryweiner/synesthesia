@@ -22,7 +22,12 @@ import { decodeStateToken, encodeStateToken } from './state/share';
 import { cleanUrl, parseLaunch, withPresetId } from './state/launch';
 import { fetchPoint, sharePoint } from './state/cloud';
 import { loadLastPoint, saveLastPoint } from './state/lastPoint';
-import { loadUserPresets, saveUserPresets, suggestPointName, removeUserPreset, USER_PRESETS_KEY } from './state/userPresets';
+import { loadUserPresets, saveUserPresets, clearUserPresets } from './state/userPresets';
+import { LIBRARY_KEY, loadLibrary, saveLibrary, removePoint, suggestPointName, upsertPoint } from './state/library';
+import type { SavedPoint } from './state/library';
+import { migrateLegacyPoints } from './state/migrate';
+import { renderPointList } from './ui/pointList';
+import type { PointRow } from './ui/pointList';
 import { keepScreenAwake } from './ui/wakelock';
 import { askConfirm, askText } from './ui/askDialog';
 import type { UserPreset } from './state/userPresets';
@@ -57,11 +62,13 @@ const status = el('status', HTMLParagraphElement);
 const details = el('details', HTMLElement);
 const audioBtn = el('audioBtn', HTMLButtonElement);
 const volume = el('volume', HTMLInputElement);
-const presetSel = el('presetSel', HTMLSelectElement);
+const pointsBtn = el('pointsBtn', HTMLButtonElement);
+const pointsPanel = el('points', HTMLDivElement);
+const pointsList = el('pointsList', HTMLDivElement);
+const pointsCloseX = el('pointsCloseX', HTMLButtonElement);
 const undoBtn = el('undoBtn', HTMLButtonElement);
 const reseedBtn = el('reseedBtn', HTMLButtonElement);
 const saveBtn = el('saveBtn', HTMLButtonElement);
-const deleteBtn = el('deleteBtn', HTMLButtonElement);
 const shareBtn = el('shareBtn', HTMLButtonElement);
 const detailsBtn = el('detailsBtn', HTMLButtonElement);
 const helpBtn = el('helpBtn', HTMLButtonElement);
@@ -313,53 +320,102 @@ function boot(): void {
     delete document.body.dataset.scout;
   }
 
-  let userPresets: UserPreset[] = loadUserPresets();
-  function refreshPresetList(): void {
-    presetSel.replaceChildren();
-    const placeholder = make('option', undefined, '— point —');
-    placeholder.value = '';
-    presetSel.appendChild(placeholder);
-    // Saved points first: a point saved a second ago must be visible without
-    // scrolling past a dozen built-ins (users read that as "it didn't save").
-    if (userPresets.length > 0) {
-      const mine = make('optgroup');
-      mine.label = 'My points';
-      userPresets.forEach((p, i) => {
-        const o = make('option', undefined, `💾 ${p.name}`);
-        o.value = `u:${i}`;
-        mine.appendChild(o);
+  // "My points" live in the library (name + cloud id); `legacy` holds points
+  // an old build stored whole, until they are uploaded (state/migrate.ts).
+  let library: SavedPoint[] = loadLibrary();
+  let legacy: UserPreset[] = loadUserPresets();
+  let currentRef = '';
+
+  function pointRows(): PointRow[] {
+    return [
+      ...library.map((p, i) => ({ ref: `u:${i}`, name: p.name, mine: true })),
+      ...legacy.map((p, i) => ({ ref: `l:${i}`, name: p.name, mine: true })),
+      ...PRESETS.map((p, i) => ({ ref: `b:${i}`, name: `${i}: ${p.name}`, mine: false })),
+    ];
+  }
+
+  function namedPoints(): { name: string }[] {
+    return [...library, ...legacy];
+  }
+
+  /** The toolbar shows what is playing; the panel is where you pick and delete. */
+  function setPointRef(ref: string): void {
+    currentRef = ref;
+    const row = pointRows().find((r) => r.ref === ref);
+    // Plain text, not setBtnText: a phone hides the .lbl half of a button,
+    // and the point's name is the one thing that has to stay readable.
+    pointsBtn.textContent = row ? `${row.mine ? '💾 ' : ''}${row.name}` : '— point —';
+    if (!pointsPanel.hidden) renderPoints();
+  }
+
+  function renderPoints(): void {
+    renderPointList(pointsList, pointRows(), currentRef, { onPick: openPoint, onDelete: deletePoint });
+  }
+
+  function openPoints(): void {
+    renderPoints();
+    pointsPanel.hidden = false;
+  }
+
+  function closePoints(): void {
+    pointsPanel.hidden = true;
+  }
+
+  pointsBtn.addEventListener('click', () => { if (pointsPanel.hidden) openPoints(); else closePoints(); });
+  pointsCloseX.addEventListener('click', closePoints);
+  pointsPanel.addEventListener('click', (e) => { if (e.target === pointsPanel) closePoints(); });
+
+  function openPoint(ref: string): void {
+    closePoints();
+    const index = Number(ref.slice(2));
+    if (ref.startsWith('b:')) {
+      const p = PRESETS[index];
+      if (!p) return;
+      loadState(cloneAppState(p.state), 'loaded');
+      setPointRef(ref);
+    } else if (ref.startsWith('l:')) {
+      const p = legacy[index];
+      if (!p) return;
+      loadState(cloneAppState(p.state), 'loaded');
+      setPointRef(ref);
+    } else {
+      const p = library[index];
+      if (!p) return;
+      setStatus(`opening “${p.name}”…`);
+      void fetchPoint(p.id, { api }).then((loaded) => {
+        if (!loaded) {
+          setStatus(`couldn't open “${p.name}” — the points server is unreachable; try again in a moment`);
+          return;
+        }
+        loadState(stateToAppState(loaded), 'loaded');
+        setPointRef(ref);
       });
-      presetSel.appendChild(mine);
     }
-    const builtin = make('optgroup');
-    builtin.label = 'Built-in';
-    PRESETS.forEach((p, i) => {
-      const o = make('option', undefined, `${i}: ${p.name}`);
-      o.value = `b:${i}`;
-      builtin.appendChild(o);
+  }
+
+  async function deletePoint(ref: string): Promise<void> {
+    const index = Number(ref.slice(2));
+    const row = pointRows().find((r) => r.ref === ref);
+    if (!row) return;
+    const ok = await askConfirm({
+      title: `Delete “${row.name}”?`,
+      detail: 'It goes from your list here. The point keeps playing, and any link you shared for it keeps working.',
+      ok: '🗑 Delete',
     });
-    presetSel.appendChild(builtin);
-    presetSel.value = '';
-    refreshDeleteBtn();
-  }
-
-  /**
-   * 🗑 only applies to the user's own points — a native <select> can't hold
-   * per-row buttons. It is hidden unless it applies, so the toolbar stays on
-   * one row on a phone.
-   */
-  function selectedUserPreset(): { index: number; preset: UserPreset } | null {
-    const v = presetSel.value;
-    if (!v.startsWith('u:')) return null;
-    const index = Number(v.slice(2));
-    const preset = userPresets[index];
-    return preset ? { index, preset } : null;
-  }
-
-  function refreshDeleteBtn(): void {
-    const applies = selectedUserPreset() !== null;
-    deleteBtn.disabled = !applies;
-    deleteBtn.hidden = !applies;
+    if (!ok) return;
+    let result;
+    if (ref.startsWith('u:')) {
+      result = saveLibrary(removePoint(loadLibrary(), index));
+      library = loadLibrary();
+    } else {
+      result = saveUserPresets(legacy.filter((_, i) => i !== index));
+      legacy = loadUserPresets();
+    }
+    if (currentRef === ref) setPointRef('');
+    renderPoints();
+    setStatus(result.ok
+      ? `deleted “${row.name}” — the point itself is still playing`
+      : storageProblem(`couldn't delete “${row.name}”`, result.reason));
   }
 
   // --- actions -----------------------------------------------------------
@@ -369,8 +425,7 @@ function boot(): void {
     history.replaceState(null, '', cleanUrl(location.href));
     stepCount++;
     presetName = undefined;
-    presetSel.value = '';
-    refreshDeleteBtn();
+    setPointRef('');
     startMorph(explorer.current, seconds);
     refreshUndo();
     const scouted = pick ? ` · scouted: best of ${pick.of} (fractal ${pick.analysis.score.toFixed(2)})` : '';
@@ -457,79 +512,56 @@ function boot(): void {
     flash(reseedBtn, '🌱 Reseeded');
   });
 
-  deleteBtn.addEventListener('click', () => { void deleteSelectedPoint(); });
-  async function deleteSelectedPoint(): Promise<void> {
-    const selected = selectedUserPreset();
-    if (!selected) return;
-    const ok = await askConfirm({
-      title: `Delete “${selected.preset.name}”?`,
-      detail: 'The point keeps playing; only the saved copy goes.',
-      ok: '🗑 Delete',
-    });
-    if (!ok) return;
-    const result = saveUserPresets(removeUserPreset(loadUserPresets(), selected.index));
-    userPresets = loadUserPresets();
-    if (presetName === selected.preset.name) presetName = undefined; // it's just a point now
-    refreshPresetList();
-    setStatus(result.ok
-      ? `deleted “${selected.preset.name}” — the point itself is still playing`
-      : storageProblem(`couldn't delete “${selected.preset.name}”`, result.reason));
-  }
-
-  presetSel.addEventListener('change', () => {
-    refreshDeleteBtn();
-    const v = presetSel.value;
-    if (!v) return;
-    const idx = Number(v.slice(2));
-    const p = v.startsWith('b:') ? PRESETS[idx] : userPresets[idx];
-    if (!p) return;
-    loadState(cloneAppState(p.state), 'loaded');
-    presetSel.value = v;
-  });
-
   /** Why a save didn't happen, in words a user can act on. */
   function storageProblem(what: string, reason: 'full' | 'blocked'): string {
     return reason === 'full'
-      ? `${what} — this browser's storage for the site is full; delete a saved point (🗑) and try again, or keep this one with 🔗 Share`
+      ? `${what} — this browser's storage is full (it is shared with every app on this site); delete a point (🗑) and try again`
       : `${what} — this browser isn't storing data for the site (private mode, or site data blocked); use 🔗 Share to keep the point`;
   }
 
+  // 💾 Save: the point goes to the points database (like 🔗 Share does) and
+  // only its name and id stay here — a whole point is 4.4 KB against ~37
+  // bytes, and the browser's storage is shared with every app on the origin
+  // (PLAN.md decision 10).
   saveBtn.addEventListener('click', () => { void saveCurrentPoint(); });
   async function saveCurrentPoint(): Promise<void> {
-    const suggested = suggestPointName(presetName, userPresets);
+    const suggested = suggestPointName(presetName, namedPoints());
     const name = await askText({ title: 'Name this point', value: suggested, ok: '💾 Save' });
     if (name === null) return;
     const s = currentState();
     s.presetName = name.trim() || suggested;
     presetName = s.presetName;
-    // Re-read before writing: another tab of the app may have saved points
-    // since this one loaded, and writing our own list back would drop them.
-    const merged = loadUserPresets();
-    const existing = merged.findIndex((p) => p.name === s.presetName);
-    if (existing >= 0) merged[existing] = { name: s.presetName, state: s };
-    else merged.push({ name: s.presetName, state: s });
-    const result = saveUserPresets(merged);
-    userPresets = loadUserPresets();
-    refreshPresetList();
+    setStatus(`saving “${s.presetName}”…`);
+    saveBtn.disabled = true;
+    let id: string;
+    try {
+      id = await sharePoint(s, { api });
+    } catch {
+      setStatus(`couldn't save “${s.presetName}” — the points server is unreachable; try again in a moment`);
+      return;
+    } finally {
+      saveBtn.disabled = false;
+    }
+    // Re-read before writing: another tab may have saved points since this
+    // one loaded, and writing our own list back would drop them.
+    const result = saveLibrary(upsertPoint(loadLibrary(), { id, name: s.presetName }));
+    library = loadLibrary();
     if (!result.ok) {
-      setStatus(storageProblem(`couldn't save “${s.presetName}”`, result.reason));
+      // The point itself is safe on the server, so hand over its link.
+      setStatus(`${storageProblem(`couldn't add “${s.presetName}” to your points`, result.reason)}. It is stored, though: ${withPresetId(location.href, id)}`);
       return;
     }
-    presetSel.value = `u:${userPresets.findIndex((p) => p.name === s.presetName)}`;
-    refreshDeleteBtn();
+    setPointRef(`u:${library.findIndex((p) => p.name === s.presetName)}`);
     flash(saveBtn, '💾 Saved');
-    setStatus(`saved as “${s.presetName}” — it's at the top of the list, under “My points”`);
+    setStatus(`saved as “${s.presetName}” — it's in the points list, under “My points”`);
     onSettled();
   }
 
   // Another tab saved or deleted a point: show the same list here.
   window.addEventListener('storage', (e) => {
-    if (e.key !== null && e.key !== USER_PRESETS_KEY) return;
-    const keep = presetSel.value;
-    userPresets = loadUserPresets();
-    refreshPresetList();
-    presetSel.value = keep;
-    refreshDeleteBtn();
+    if (e.key !== null && e.key !== LIBRARY_KEY) return;
+    library = loadLibrary();
+    setPointRef(currentRef);
   });
 
   // 🔗 Share: store the point in the cloud and copy a short ?presetId= link;
@@ -642,6 +674,7 @@ function boot(): void {
   document.addEventListener('keydown', (e) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
     if (!helpBox.hidden) { if (e.key === 'Escape' || e.key === 'Enter') closeHelp(); return; }
+    if (!pointsPanel.hidden) { if (e.key === 'Escape') closePoints(); return; }
     if (e.key === 'Escape' && !details.hidden) { closeDetails(); return; }
     switch (e.key) {
       case 'ArrowRight': like(); break;
@@ -717,7 +750,7 @@ function boot(): void {
   }
 
   // --- boot ----------------------------------------------------------------
-  refreshPresetList();
+  setPointRef('');
   // What to open: ?presetId= (cloud) > #s= (old long links) > ?preset=N >
   // the last point (localStorage) > the default preset. See state/launch.ts.
   function openFallback(url: string): void {
@@ -728,7 +761,7 @@ function boot(): void {
     }
     const p = PRESETS[DEFAULT_PRESET_INDEX];
     loadState(cloneAppState(p.state), 'loaded', url);
-    presetSel.value = `b:${DEFAULT_PRESET_INDEX}`;
+    setPointRef(`b:${DEFAULT_PRESET_INDEX}`);
   }
 
   const launch = parseLaunch(location.href);
@@ -747,11 +780,31 @@ function boot(): void {
     else openFallback(cleanUrl(location.href));
   } else if (launch.kind === 'preset' && PRESETS[launch.index]) {
     loadState(cloneAppState(PRESETS[launch.index].state), 'loaded');
-    presetSel.value = `b:${launch.index}`;
+    setPointRef(`b:${launch.index}`);
   } else {
     openFallback(cleanUrl(location.href));
   }
   if (launch.kind !== 'presetId') document.body.dataset.launched = '1';
+
+  // Points an old build stored whole (4.4 KB each) move to the library and
+  // the old key is dropped, which is also what frees the storage a user with
+  // a full quota is stuck on. Anything that can't be uploaded stays put and
+  // is retried next time.
+  if (legacy.length > 0) {
+    void migrateLegacyPoints({
+      upload: (st) => sharePoint(st, { api }),
+      readLibrary: loadLibrary,
+      writeLibrary: saveLibrary,
+      readLegacy: loadUserPresets,
+      writeLegacy: saveUserPresets,
+      clearLegacy: clearUserPresets,
+    }).then((res) => {
+      library = res.library;
+      legacy = res.legacy;
+      setPointRef(currentRef);
+      document.body.dataset.migrated = `${res.moved}/${res.stored ? 'stored' : 'memory'}`;
+    });
+  }
   let helpShown = false;
   try { helpShown = localStorage.getItem(HELP_SHOWN_KEY) === '1'; } catch { /* private mode */ }
   if (!helpShown) openHelp();

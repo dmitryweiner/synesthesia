@@ -7,7 +7,6 @@ import { FORMULA_IDS } from '../src/dsp/generator';
 import { CARDS } from '../src/schema/visual';
 import { DEFAULT_FX } from '../src/schema/audio';
 import { b64urlDecode, b64urlEncode, decodeStateToken, encodeStateToken, tokenFromHash } from '../src/state/share';
-import { loadUserPresets, saveUserPresets, nextPresetNumber, suggestPointName, removeUserPreset, USER_PRESETS_KEY } from '../src/state/userPresets';
 
 describe('defaultAppState', () => {
   it('has every formula (disabled, UI defaults), every card, 4 idle LFOs, zero coupling', () => {
@@ -163,76 +162,5 @@ describe('share tokens', () => {
     expect(decodeStateToken('!!!')).toBeNull();
     expect(tokenFromHash('#s=abc_-123')).toBe('abc_-123');
     expect(tokenFromHash('#other')).toBeNull();
-  });
-});
-
-describe('userPresets (localStorage)', () => {
-  const store = new Map<string, string>();
-  beforeAll(() => {
-    Object.defineProperty(globalThis, 'localStorage', {
-      configurable: true,
-      value: {
-        getItem: (k: string) => store.get(k) ?? null,
-        setItem: (k: string, v: string) => { store.set(k, v); },
-        removeItem: (k: string) => { store.delete(k); },
-      },
-    });
-  });
-
-  it('empty → []; save/load round trip; junk filtered', () => {
-    expect(loadUserPresets()).toEqual([]);
-    const s = defaultAppState();
-    expect(saveUserPresets([{ name: 'One', state: s }])).toEqual({ ok: true });
-    expect(loadUserPresets()).toEqual([{ name: 'One', state: s }]);
-    store.set(USER_PRESETS_KEY, JSON.stringify([{ name: 'ok', state: {} }, { nope: 1 }, 5]));
-    expect(loadUserPresets()).toHaveLength(1);
-    store.set(USER_PRESETS_KEY, '{not json');
-    expect(loadUserPresets()).toEqual([]);
-  });
-
-  it('nextPresetNumber', () => {
-    expect(nextPresetNumber([])).toBe(1);
-    expect(nextPresetNumber([{ name: 'Point 3', state: defaultAppState() }, { name: 'x', state: defaultAppState() }])).toBe(4);
-  });
-
-  it('saveUserPresets reports a full/blocked storage instead of throwing, and verifies the write', () => {
-    const list = [{ name: 'a', state: defaultAppState() }];
-    expect(saveUserPresets(list)).toEqual({ ok: true });
-
-    const real = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
-    const fail = (setItem: () => void) => {
-      Object.defineProperty(globalThis, 'localStorage', {
-        configurable: true,
-        value: { getItem: () => null, setItem, removeItem: () => {} },
-      });
-    };
-    fail(() => { throw new DOMException('quota', 'QuotaExceededError'); });
-    expect(saveUserPresets(list)).toEqual({ ok: false, reason: 'full' });
-    fail(() => { throw new Error('denied'); });
-    expect(saveUserPresets(list)).toEqual({ ok: false, reason: 'blocked' });
-    fail(() => {}); // pretends to succeed but stores nothing
-    expect(saveUserPresets(list)).toEqual({ ok: false, reason: 'blocked' });
-    if (real) Object.defineProperty(globalThis, 'localStorage', real);
-  });
-
-  it('removeUserPreset drops one by index, leaves the input alone, ignores bad indexes', () => {
-    const list = [
-      { name: 'a', state: defaultAppState() },
-      { name: 'b', state: defaultAppState() },
-      { name: 'c', state: defaultAppState() },
-    ];
-    expect(removeUserPreset(list, 1).map((p) => p.name)).toEqual(['a', 'c']);
-    expect(list.map((p) => p.name)).toEqual(['a', 'b', 'c']);
-    expect(removeUserPreset(list, -1)).toEqual(list);
-    expect(removeUserPreset(list, 3)).toEqual(list);
-    expect(removeUserPreset([], 0)).toEqual([]);
-  });
-
-  it('suggestPointName never proposes a built-in name (a saved copy would look identical in the list)', () => {
-    const mine = [{ name: 'My thing', state: defaultAppState() }, { name: 'Point 1', state: defaultAppState() }];
-    expect(suggestPointName(undefined, [])).toBe('Point 1');
-    expect(suggestPointName('Molten Polivoks', mine)).toBe('Point 2'); // built-in name → a fresh one
-    expect(suggestPointName('My thing', mine)).toBe('My thing');       // own point → offer to overwrite
-    expect(suggestPointName(undefined, mine)).toBe('Point 2');
   });
 });

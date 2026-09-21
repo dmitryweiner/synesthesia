@@ -96,16 +96,14 @@ body {
   color: #fff;
 }
 
-#topbar select {
+/* The current point's name; opens the points panel (see #points). */
+.points-btn {
   flex: none;
   max-width: 220px;
-  height: 32px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   background: var(--panel);
-  color: var(--text);
-  border: 1px solid #30363d;
-  border-radius: 6px;
-  padding: 0 6px;
-  font: inherit;
 }
 
 #volLab {
@@ -374,7 +372,7 @@ body {
   /* Two deliberate rows instead of squeezing: row 1 is Sound + the point
      name (which must stay readable — it was down to 28px), row 2 is the
      icon buttons spread evenly. Stable whether or not 🗑 is showing. */
-  #topbar select {
+  #pointsBtn {
     order: 2;
     flex: 1 1 auto;
     min-width: 0;
@@ -392,7 +390,7 @@ body {
     height: 0;
   }
 
-  #topbar > button:not(#audioBtn) {
+  #topbar > button:not(#audioBtn):not(#pointsBtn) {
     order: 4;
     flex: 1 1 auto;
   }
@@ -420,6 +418,118 @@ body {
   #helpContent {
     font-size: 13.5px;
   }
+}
+
+/* The points panel: saved points with a 🗑 on each row, then the built-ins
+   (ui/pointList.ts). A native <select> renders as a system sheet on a phone,
+   where a per-row button is impossible. */
+#points {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 35;
+}
+
+#pointsBox {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(420px, 100%);
+  max-height: min(80vh, 80dvh);
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--panel);
+  border: 1px solid #30363d;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+}
+
+#pointsTitle {
+  margin: 0 0 8px;
+  padding-right: 32px;
+  font-size: 16px;
+}
+
+#pointsList {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.point-group {
+  margin: 10px 0 4px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--muted);
+}
+
+.point-group:first-child {
+  margin-top: 0;
+}
+
+.point-empty {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.point-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.point-pick {
+  flex: 1;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 10px;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: inherit;
+  color: var(--text);
+  background: var(--card);
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+/* hover only where there is a pointer: on a touch screen it sticks to the
+   last row tapped, which reads as "this one is selected" */
+@media (hover: hover) {
+  .point-pick:hover,
+  .point-del:hover {
+    border-color: var(--accent);
+  }
+}
+
+.point-pick:focus-visible,
+.point-del:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.point-pick.current {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.point-del {
+  flex: none;
+  width: 44px;
+  min-height: 40px;
+  font: inherit;
+  color: var(--muted);
+  background: var(--card);
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  cursor: pointer;
 }
 
 /* Our own prompt / confirm (ui/askDialog.ts) — native dialogs can be

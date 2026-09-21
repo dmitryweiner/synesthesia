@@ -48,14 +48,15 @@ you don't, and the search follows.
   Renders are 24 s at 8 kHz: about as cheap as 8 s at 16 kHz, but they rank
   candidates much closer to a full 30 s / 22 kHz render (Spearman ρ 0.73
   vs 0.23). Disable with `?scout=0`.
-- **Keep it / share it.** 💾 Save stores the point in your browser (saved
-  points sit at the top of the dropdown under *My points*; 🗑 deletes the
-  selected one; if the browser refuses to store it — a full or blocked
-  origin quota — the status line says so instead of losing it quietly). 🔗 Share
-  stores it in a tiny cloud database and copies a short link
+- **Keep it / share it.** 💾 Save stores the point in a tiny cloud
+  database and keeps its name and id in this browser; it then sits under
+  *My points* in the points list, with a 🗑 on its row (that removes it
+  from your list — links you shared keep working). 🔗 Share stores the
+  point the same way and copies a short link
   (`…/synesthesia/?presetId=cnG1Iacvvb`) — the same point always gets the
-  same link. The current point also survives a reload. Old long `#s=…`
-  links still open.
+  same link. Saving and opening a saved point need the network, and the
+  status line says so when it isn't there. The current point survives a
+  reload on its own, and old long `#s=…` links still open.
 
 Keys: ← 👎 · → 👍 · ↑ 🎲 · Backspace ↩ · Space ▶ sound.
 
