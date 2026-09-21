@@ -50,7 +50,8 @@ you don't, and the search follows.
   vs 0.23). Disable with `?scout=0`.
 - **Keep it / share it.** 💾 Save stores the point in your browser (saved
   points sit at the top of the dropdown under *My points*; 🗑 deletes the
-  selected one). 🔗 Share
+  selected one; if the browser refuses to store it — a full or blocked
+  origin quota — the status line says so instead of losing it quietly). 🔗 Share
   stores it in a tiny cloud database and copies a short link
   (`…/synesthesia/?presetId=cnG1Iacvvb`) — the same point always gets the
   same link. The current point also survives a reload. Old long `#s=…`

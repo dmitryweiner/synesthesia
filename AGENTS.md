@@ -248,3 +248,10 @@ dimension of the loudest 20% of a 64-band log-frequency spectrogram.
 - Never write an oscillator as sin(2π·f·t) with absolute t —
   tests/continuity.test.ts will catch it; accumulate phase.
 - Don't let scripts or tests write to the production Worker/D1.
+- Never use `window.prompt` / `confirm` / `alert`: mobile browsers may
+  suppress them, and a suppressed `prompt()` returns null, so the action
+  silently does nothing. Use `src/ui/askDialog.ts` (the smoke fails on any
+  native dialog).
+- Never let a `localStorage` write fail in silence — the quota is shared by
+  every app on the origin. Write through `saveUserPresets`-style helpers
+  that read back what they wrote and report `full` / `blocked` to the user.

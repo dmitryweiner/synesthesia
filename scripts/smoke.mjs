@@ -48,6 +48,37 @@ function check(cond, msg) {
   if (!cond) errors.push(`[${ctxLabel}] ${msg}`);
 }
 
+// Native dialogs are never used: mobile browsers may suppress them, and a
+// suppressed prompt() returns null, so Save would do nothing at all.
+let nativeDialog = '';
+page.on('dialog', (d) => { nativeDialog = `${d.type()}: ${d.message()}`; void d.dismiss(); });
+
+// The app's own prompt/confirm (src/ui/askDialog.ts).
+async function askDialog() {
+  await page.waitForSelector('#askDialog', { timeout: 5000 });
+  // must fit the screen, buttons and all — a phone showed neither for #help
+  const box = await page.locator('#askDialog .ask-box').boundingBox();
+  const vp = page.viewportSize();
+  check(box && box.y >= 0 && box.y + box.height <= vp.height + 1, `dialog does not fit: ${JSON.stringify(box)} in ${vp.height}px`);
+  return {
+    title: (await page.locator('#askDialog .ask-title').textContent()) ?? '',
+    value: await page.$eval('#askInput', (i) => i.value).catch(() => null),
+  };
+}
+async function askAccept(text) {
+  const seen = await askDialog();
+  if (text !== undefined) await page.fill('#askInput', text);
+  await page.locator('#askOk').click();
+  await page.waitForSelector('#askDialog', { state: 'detached', timeout: 5000 });
+  return seen;
+}
+async function askCancel() {
+  const seen = await askDialog();
+  await page.locator('#askCancel').click();
+  await page.waitForSelector('#askDialog', { state: 'detached', timeout: 5000 });
+  return seen;
+}
+
 const statusText = async (p = page) => (await p.locator('#status').textContent()) ?? '';
 const hashOf = (p = page) => p.evaluate(() => location.hash);
 const MORPH_WAIT = 2400; // > MORPH_SECONDS in main.ts
@@ -184,9 +215,8 @@ ctxLabel = 'save';
 await page.selectOption('#presetSel', 'b:3');
 await page.waitForTimeout(600);
 const builtinName = (await page.$eval('#presetSel option[value="b:3"]', (o) => o.textContent ?? '')).replace(/^\d+: /, '');
-let suggestedName = '';
-page.once('dialog', (d) => { suggestedName = d.defaultValue(); d.accept('Smoke point'); });
 await page.locator('#saveBtn').click();
+const suggestedName = (await askAccept('Smoke point')).value ?? '';
 await page.waitForTimeout(300);
 const saved = await page.evaluate(() => {
   const sel = document.getElementById('presetSel');
@@ -232,9 +262,8 @@ await page.waitForTimeout(400);
 check(await page.locator('#deleteBtn').isHidden(), 'delete must not be offered for a built-in preset');
 await page.selectOption('#presetSel', 'u:0');
 await page.waitForTimeout(400);
-let confirmText = '';
-page.once('dialog', (d) => { confirmText = d.message(); d.accept(); });
 await page.locator('#deleteBtn').click();
+const confirmText = (await askAccept()).title;
 await page.waitForTimeout(400);
 check(confirmText.includes('Smoke point'), `delete should confirm by name: "${confirmText}"`);
 check((await statusText()).includes('deleted'), `delete should report in the status line: "${await statusText()}"`);
@@ -242,13 +271,40 @@ check((await page.$$eval('#presetSel option', (els) => els.map((o) => o.value).f
 check(await page.locator('#deleteBtn').isHidden(), 'delete should go away once nothing of yours is selected');
 check(!(await page.evaluate(() => localStorage.getItem('synesthesia_user_presets_v1') ?? '')).includes('Smoke point'), 'the deleted point is still in localStorage');
 // a cancelled delete keeps the point
-page.once('dialog', (d) => d.accept('Kept point'));
 await page.locator('#saveBtn').click();
+await askAccept('Kept point');
 await page.waitForTimeout(400);
-page.once('dialog', (d) => d.dismiss());
 await page.locator('#deleteBtn').click();
+await askCancel();
 await page.waitForTimeout(300);
-check((await page.$$eval('#presetSel option', (els) => els.map((o) => o.value).filter((v) => v.startsWith('u:')))).length === 1, 'cancelling the confirm must keep the point');
+const userOptions = () => page.$$eval('#presetSel option', (els) => els.map((o) => o.textContent ?? '').filter((t) => t.startsWith('💾')));
+check((await userOptions()).length === 1, 'cancelling the confirm must keep the point');
+
+// --- a save that the browser refuses must say so, not fail silently ---
+// The localStorage quota is shared by every app on the origin, so a user
+// with other saved things can hit it here. Refusing the app's own key
+// reproduces that exactly, without depending on the browser's quota size.
+ctxLabel = 'storage full';
+await page.evaluate((key) => {
+  const real = Storage.prototype.setItem;
+  window.__allowStorage = () => { Storage.prototype.setItem = real; };
+  Storage.prototype.setItem = function setItem(k, v) {
+    if (k === key) throw new DOMException('quota', 'QuotaExceededError');
+    return real.call(this, k, v);
+  };
+}, 'synesthesia_user_presets_v1');
+await page.locator('#saveBtn').click();
+await askAccept('No room point');
+await page.waitForTimeout(400);
+check((await statusText()).includes("couldn't save"), `a refused save must be reported: "${await statusText()}"`);
+check((await statusText()).includes('full'), `a refused save should say the storage is full: "${await statusText()}"`);
+check(!(await userOptions()).some((t) => t.includes('No room point')), 'a point that was not stored must not be listed as saved');
+await page.evaluate(() => window.__allowStorage());
+await page.locator('#saveBtn').click();
+await askAccept('Room again point');
+await page.waitForTimeout(400);
+check((await statusText()).includes('saved as'), `saving must work again once there is room: "${await statusText()}"`);
+check((await userOptions()).some((t) => t.includes('Room again point')), 'the point saved after freeing space is missing');
 
 // --- share: short link through the (local) points Worker ---
 ctxLabel = 'share';
@@ -333,6 +389,8 @@ await page.waitForTimeout(600);
 check(((await page.locator('#audioBtn').textContent()) ?? '').includes('▶'), 'audio did not stop');
 await page.locator('#likeBtn').click(); // feedback still works without sound
 await page.waitForTimeout(300);
+
+check(nativeDialog === '', `the app must not use native dialogs (they can be suppressed on mobile): ${nativeDialog}`);
 
 if (flags.has('screenshot')) {
   const out = flags.get('screenshot');

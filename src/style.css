@@ -421,3 +421,69 @@ body {
     font-size: 13.5px;
   }
 }
+
+/* Our own prompt / confirm (ui/askDialog.ts) — native dialogs can be
+   suppressed on mobile, and they look nothing like the app. */
+.ask-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 40;
+}
+
+.ask-box {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(420px, 100%);
+  max-height: min(86vh, 86dvh);
+  overflow-y: auto;
+  padding: 18px 20px;
+  border-radius: 12px;
+  background: var(--panel);
+  border: 1px solid #30363d;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+}
+
+.ask-title {
+  margin: 0;
+  padding-right: 32px;
+  font-size: 16px;
+}
+
+.ask-detail {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.ask-input {
+  height: 40px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 16px; /* smaller text makes iOS zoom the page on focus */
+  color: var(--text);
+  background: var(--card);
+  border: 1px solid #30363d;
+  border-radius: 8px;
+}
+
+.ask-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.ask-row {
+  display: flex;
+  gap: 8px;
+}
+
+.ask-row .tb-btn {
+  flex: 1;
+  height: 40px;
+}

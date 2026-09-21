@@ -26,8 +26,29 @@ export function loadUserPresets(): UserPreset[] {
   }
 }
 
-export function saveUserPresets(presets: UserPreset[]): void {
-  localStorage.setItem(USER_PRESETS_KEY, JSON.stringify(presets));
+export type SaveResult = { ok: true } | { ok: false; reason: 'full' | 'blocked' };
+
+/**
+ * Saves and reads back to confirm. Browsers can refuse quietly: the
+ * localStorage quota is shared by every site on the origin (all of
+ * dmitryweiner.github.io here), and private/blocked storage can accept a
+ * write that vanishes. A silent failure looks exactly like "saving is
+ * broken", so the caller must be able to say so.
+ */
+export function saveUserPresets(presets: UserPreset[]): SaveResult {
+  const json = JSON.stringify(presets);
+  try {
+    localStorage.setItem(USER_PRESETS_KEY, json);
+  } catch (err) {
+    const name = err instanceof DOMException ? err.name : '';
+    return { ok: false, reason: name === 'QuotaExceededError' || name === 'NS_ERROR_DOM_QUOTA_REACHED' ? 'full' : 'blocked' };
+  }
+  try {
+    if (localStorage.getItem(USER_PRESETS_KEY) !== json) return { ok: false, reason: 'blocked' };
+  } catch {
+    return { ok: false, reason: 'blocked' };
+  }
+  return { ok: true };
 }
 
 /** Next free number for the auto-name "Point N". */

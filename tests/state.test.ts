@@ -182,7 +182,7 @@ describe('userPresets (localStorage)', () => {
   it('empty → []; save/load round trip; junk filtered', () => {
     expect(loadUserPresets()).toEqual([]);
     const s = defaultAppState();
-    saveUserPresets([{ name: 'One', state: s }]);
+    expect(saveUserPresets([{ name: 'One', state: s }])).toEqual({ ok: true });
     expect(loadUserPresets()).toEqual([{ name: 'One', state: s }]);
     store.set(USER_PRESETS_KEY, JSON.stringify([{ name: 'ok', state: {} }, { nope: 1 }, 5]));
     expect(loadUserPresets()).toHaveLength(1);
@@ -193,6 +193,26 @@ describe('userPresets (localStorage)', () => {
   it('nextPresetNumber', () => {
     expect(nextPresetNumber([])).toBe(1);
     expect(nextPresetNumber([{ name: 'Point 3', state: defaultAppState() }, { name: 'x', state: defaultAppState() }])).toBe(4);
+  });
+
+  it('saveUserPresets reports a full/blocked storage instead of throwing, and verifies the write', () => {
+    const list = [{ name: 'a', state: defaultAppState() }];
+    expect(saveUserPresets(list)).toEqual({ ok: true });
+
+    const real = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+    const fail = (setItem: () => void) => {
+      Object.defineProperty(globalThis, 'localStorage', {
+        configurable: true,
+        value: { getItem: () => null, setItem, removeItem: () => {} },
+      });
+    };
+    fail(() => { throw new DOMException('quota', 'QuotaExceededError'); });
+    expect(saveUserPresets(list)).toEqual({ ok: false, reason: 'full' });
+    fail(() => { throw new Error('denied'); });
+    expect(saveUserPresets(list)).toEqual({ ok: false, reason: 'blocked' });
+    fail(() => {}); // pretends to succeed but stores nothing
+    expect(saveUserPresets(list)).toEqual({ ok: false, reason: 'blocked' });
+    if (real) Object.defineProperty(globalThis, 'localStorage', real);
   });
 
   it('removeUserPreset drops one by index, leaves the input alone, ignores bad indexes', () => {

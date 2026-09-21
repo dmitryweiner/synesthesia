@@ -85,4 +85,6 @@ export function renderDetails(root: HTMLElement, state: AppState, analysis: Soun
     .filter((k) => Math.abs(state.coupling[k]) > 0.01)
     .map((k) => `${COUPLING_LABELS[k]} ${state.coupling[k] >= 0 ? '+' : ''}${fmt(state.coupling[k])}`);
   section(root, 'Sound → image', coupling);
+
+  section(root, 'Build', [typeof __BUILD__ === 'string' ? `${__BUILD__} UTC` : 'dev']);
 }

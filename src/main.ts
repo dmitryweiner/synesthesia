@@ -22,8 +22,9 @@ import { decodeStateToken, encodeStateToken } from './state/share';
 import { cleanUrl, parseLaunch, withPresetId } from './state/launch';
 import { fetchPoint, sharePoint } from './state/cloud';
 import { loadLastPoint, saveLastPoint } from './state/lastPoint';
-import { loadUserPresets, saveUserPresets, suggestPointName, removeUserPreset } from './state/userPresets';
+import { loadUserPresets, saveUserPresets, suggestPointName, removeUserPreset, USER_PRESETS_KEY } from './state/userPresets';
 import { keepScreenAwake } from './ui/wakelock';
+import { askConfirm, askText } from './ui/askDialog';
 import type { UserPreset } from './state/userPresets';
 import { PRESETS, DEFAULT_PRESET_INDEX } from './presets';
 import { decodeGenome, encodeGenome } from './genome/codec';
@@ -456,16 +457,24 @@ function boot(): void {
     flash(reseedBtn, '🌱 Reseeded');
   });
 
-  deleteBtn.addEventListener('click', () => {
+  deleteBtn.addEventListener('click', () => { void deleteSelectedPoint(); });
+  async function deleteSelectedPoint(): Promise<void> {
     const selected = selectedUserPreset();
     if (!selected) return;
-    if (!window.confirm(`Delete the saved point “${selected.preset.name}”?`)) return;
-    saveUserPresets(removeUserPreset(userPresets, selected.index));
+    const ok = await askConfirm({
+      title: `Delete “${selected.preset.name}”?`,
+      detail: 'The point keeps playing; only the saved copy goes.',
+      ok: '🗑 Delete',
+    });
+    if (!ok) return;
+    const result = saveUserPresets(removeUserPreset(loadUserPresets(), selected.index));
     userPresets = loadUserPresets();
     if (presetName === selected.preset.name) presetName = undefined; // it's just a point now
     refreshPresetList();
-    setStatus(`deleted “${selected.preset.name}” — the point itself is still playing`);
-  });
+    setStatus(result.ok
+      ? `deleted “${selected.preset.name}” — the point itself is still playing`
+      : storageProblem(`couldn't delete “${selected.preset.name}”`, result.reason));
+  }
 
   presetSel.addEventListener('change', () => {
     refreshDeleteBtn();
@@ -478,24 +487,49 @@ function boot(): void {
     presetSel.value = v;
   });
 
-  saveBtn.addEventListener('click', () => {
+  /** Why a save didn't happen, in words a user can act on. */
+  function storageProblem(what: string, reason: 'full' | 'blocked'): string {
+    return reason === 'full'
+      ? `${what} — this browser's storage for the site is full; delete a saved point (🗑) and try again, or keep this one with 🔗 Share`
+      : `${what} — this browser isn't storing data for the site (private mode, or site data blocked); use 🔗 Share to keep the point`;
+  }
+
+  saveBtn.addEventListener('click', () => { void saveCurrentPoint(); });
+  async function saveCurrentPoint(): Promise<void> {
     const suggested = suggestPointName(presetName, userPresets);
-    const name = window.prompt('Name this point:', suggested);
+    const name = await askText({ title: 'Name this point', value: suggested, ok: '💾 Save' });
     if (name === null) return;
     const s = currentState();
     s.presetName = name.trim() || suggested;
     presetName = s.presetName;
-    const existing = userPresets.findIndex((p) => p.name === s.presetName);
-    if (existing >= 0) userPresets[existing] = { name: s.presetName, state: s };
-    else userPresets.push({ name: s.presetName, state: s });
-    saveUserPresets(userPresets);
+    // Re-read before writing: another tab of the app may have saved points
+    // since this one loaded, and writing our own list back would drop them.
+    const merged = loadUserPresets();
+    const existing = merged.findIndex((p) => p.name === s.presetName);
+    if (existing >= 0) merged[existing] = { name: s.presetName, state: s };
+    else merged.push({ name: s.presetName, state: s });
+    const result = saveUserPresets(merged);
     userPresets = loadUserPresets();
     refreshPresetList();
+    if (!result.ok) {
+      setStatus(storageProblem(`couldn't save “${s.presetName}”`, result.reason));
+      return;
+    }
     presetSel.value = `u:${userPresets.findIndex((p) => p.name === s.presetName)}`;
     refreshDeleteBtn();
     flash(saveBtn, '💾 Saved');
     setStatus(`saved as “${s.presetName}” — it's at the top of the list, under “My points”`);
     onSettled();
+  }
+
+  // Another tab saved or deleted a point: show the same list here.
+  window.addEventListener('storage', (e) => {
+    if (e.key !== null && e.key !== USER_PRESETS_KEY) return;
+    const keep = presetSel.value;
+    userPresets = loadUserPresets();
+    refreshPresetList();
+    presetSel.value = keep;
+    refreshDeleteBtn();
   });
 
   // 🔗 Share: store the point in the cloud and copy a short ?presetId= link;
@@ -533,7 +567,7 @@ function boot(): void {
         await navigator.clipboard.writeText(url);
         copied = true;
       } catch {
-        window.prompt('Copy this link:', url);
+        await askText({ title: 'Copy this link', value: url, ok: 'Done' });
       }
     }
     shareBtn.disabled = false;

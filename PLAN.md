@@ -156,6 +156,39 @@ starting points of every exploration.
   gesture and re-taken when the tab becomes visible again; it degrades
   silently where the API is missing or refused.
 
+## "Points still don't save on mobile Chrome" (2026-09-21)
+
+Reported with screenshots from Android Chrome: the app's own *Name this
+point* prompt appeared, the point never showed up in the list, and nothing
+said why. Not reproducible under mobile emulation, so the two ways a phone
+can refuse a save were both removed instead of guessing:
+
+- **Native dialogs are gone.** `window.prompt` / `window.confirm` can be
+  suppressed on mobile — after a few dialogs Chrome for Android offers
+  "prevent this page from creating more dialogs", and from then on `prompt()`
+  returns `null` with nothing shown, which our code read as "user
+  cancelled": Save silently did nothing. Saving, deleting and the
+  copy-link fallback now use the app's own dialog (`src/ui/askDialog.ts`),
+  which also fits a phone screen (the native one covers it). The smoke test
+  fails if any native dialog is ever opened.
+- **A refused write is now reported.** `saveUserPresets` returns
+  `{ ok: false, reason: 'full' | 'blocked' }` instead of throwing, and
+  verifies by reading back what it wrote (a blocked or private-mode store
+  can accept a write that vanishes). The status line then says the storage
+  is full (delete a point or use 🔗 Share) or that the browser isn't storing
+  site data — and the list shows what is really stored, never a phantom
+  entry. **The localStorage quota is shared by the whole origin**, so every
+  app on `dmitryweiner.github.io` (formula-synth, chromaflux, monitoring, …)
+  eats into the same budget.
+- **Saving merges with what's on disk.** It re-reads localStorage
+  immediately before writing, so a second tab (the report came from a phone
+  with 9 tabs open) can't drop points saved in the first; a `storage` event
+  refreshes the list in the other tabs.
+- **The build stamp is visible** in *Details* (`__BUILD__`, injected by
+  `vite.config.ts`). The screenshots showed a pre-fix build running in a
+  long-open tab, which cost most of the diagnosis; now a screenshot says
+  which build it is.
+
 ## Architecture
 
 ```
