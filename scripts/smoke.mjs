@@ -223,6 +223,33 @@ await page.selectOption('#presetSel', 'u:0');
 await page.waitForTimeout(500);
 check((await statusText()).includes('Smoke point'), 'loading the saved point');
 
+// --- delete a saved point (built-ins can't be deleted) ---
+ctxLabel = 'delete';
+check(await page.locator('#deleteBtn').isVisible(), 'delete should be offered for a saved point');
+await page.selectOption('#presetSel', 'b:0');
+await page.waitForTimeout(400);
+// hidden, not just disabled: the toolbar must stay on one row on a phone
+check(await page.locator('#deleteBtn').isHidden(), 'delete must not be offered for a built-in preset');
+await page.selectOption('#presetSel', 'u:0');
+await page.waitForTimeout(400);
+let confirmText = '';
+page.once('dialog', (d) => { confirmText = d.message(); d.accept(); });
+await page.locator('#deleteBtn').click();
+await page.waitForTimeout(400);
+check(confirmText.includes('Smoke point'), `delete should confirm by name: "${confirmText}"`);
+check((await statusText()).includes('deleted'), `delete should report in the status line: "${await statusText()}"`);
+check((await page.$$eval('#presetSel option', (els) => els.map((o) => o.value).filter((v) => v.startsWith('u:')))).length === 0, 'the deleted point is still in the list');
+check(await page.locator('#deleteBtn').isHidden(), 'delete should go away once nothing of yours is selected');
+check(!(await page.evaluate(() => localStorage.getItem('synesthesia_user_presets_v1') ?? '')).includes('Smoke point'), 'the deleted point is still in localStorage');
+// a cancelled delete keeps the point
+page.once('dialog', (d) => d.accept('Kept point'));
+await page.locator('#saveBtn').click();
+await page.waitForTimeout(400);
+page.once('dialog', (d) => d.dismiss());
+await page.locator('#deleteBtn').click();
+await page.waitForTimeout(300);
+check((await page.$$eval('#presetSel option', (els) => els.map((o) => o.value).filter((v) => v.startsWith('u:')))).length === 1, 'cancelling the confirm must keep the point');
+
 // --- share: short link through the (local) points Worker ---
 ctxLabel = 'share';
 await page.locator('#likeBtn').click();

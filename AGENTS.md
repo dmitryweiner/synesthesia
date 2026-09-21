@@ -83,6 +83,10 @@ Corollaries:
 - **Popups must be closable from themselves** (✕ on the panel, Escape), and
   must fit a 390×560 screen — a dialog taller than the viewport hides its own
   button. The smoke measures both.
+- **The phone toolbar is two rows by design** (Sound + point name, then the
+  icons): flex `order` + a `#topbar::after` line break. Adding another
+  always-visible button squeezes the `<select>` to an unreadable stub —
+  measure `#presetSel` width at 390 px after touching the toolbar.
 - **Long analysis runs die when you edit `src/`** (Vite full-reloads the
   page). Run them against a snapshot on another port instead:
   `rsync -a --exclude node_modules --exclude docs --exclude shots --exclude .git ./ $SNAP/`,

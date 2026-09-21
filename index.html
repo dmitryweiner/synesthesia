@@ -14,6 +14,7 @@
         <button id="audioBtn" class="tb-btn primary" title="Start / stop sound (Space)">▶ Sound</button>
         <label id="volLab" title="Volume">🔊<input id="volume" type="range" min="0" max="1" step="0.01" value="0.75" /></label>
         <select id="presetSel" title="Built-in and saved points"></select>
+        <button id="deleteBtn" class="tb-btn" title="Delete the selected saved point" disabled hidden>🗑 Delete</button>
         <button id="undoBtn" class="tb-btn" title="Undo the last change (Backspace)" disabled>↩ Undo</button>
         <button id="reseedBtn" class="tb-btn" title="Restart the image pattern from fresh seeds">🌱 Reseed</button>
         <span class="tb-spacer"></span>
@@ -50,7 +51,7 @@
               <li><b>👎 Not this</b> — go back to the last thing you liked and try another direction (bigger steps).</li>
               <li><b>🎲 Surprise</b> — jump near a random built-in preset.</li>
               <li><b>↩ Undo</b> — revert the last change (up to 5).</li>
-              <li><b>💾 Save</b> keeps the point in this browser; <b>🔗 Share</b> copies a short link to it. The current point also survives a page reload.</li>
+              <li><b>💾 Save</b> keeps the point in this browser — saved points sit at the top of the list, and <b>🗑</b> removes the selected one. <b>🔗 Share</b> copies a short link. The current point also survives a page reload.</li>
             </ul>
             <p>Sound and image share the same slow LFOs, and the picture listens: it breathes with loudness swells, flashes and sprouts new growth (with a ripple) on every hit, and bass / mid / treble tint its dark / mid / light tones. Press <b>▶ Sound</b> to start audio (browsers need a click for that).</p>
             <p>Keys: ← 👎 · → 👍 · ↑ 🎲 · Backspace ↩ · Space ▶</p>

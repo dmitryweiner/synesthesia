@@ -7,7 +7,7 @@ import { FORMULA_IDS } from '../src/dsp/generator';
 import { CARDS } from '../src/schema/visual';
 import { DEFAULT_FX } from '../src/schema/audio';
 import { b64urlDecode, b64urlEncode, decodeStateToken, encodeStateToken, tokenFromHash } from '../src/state/share';
-import { loadUserPresets, saveUserPresets, nextPresetNumber, suggestPointName, USER_PRESETS_KEY } from '../src/state/userPresets';
+import { loadUserPresets, saveUserPresets, nextPresetNumber, suggestPointName, removeUserPreset, USER_PRESETS_KEY } from '../src/state/userPresets';
 
 describe('defaultAppState', () => {
   it('has every formula (disabled, UI defaults), every card, 4 idle LFOs, zero coupling', () => {
@@ -193,6 +193,19 @@ describe('userPresets (localStorage)', () => {
   it('nextPresetNumber', () => {
     expect(nextPresetNumber([])).toBe(1);
     expect(nextPresetNumber([{ name: 'Point 3', state: defaultAppState() }, { name: 'x', state: defaultAppState() }])).toBe(4);
+  });
+
+  it('removeUserPreset drops one by index, leaves the input alone, ignores bad indexes', () => {
+    const list = [
+      { name: 'a', state: defaultAppState() },
+      { name: 'b', state: defaultAppState() },
+      { name: 'c', state: defaultAppState() },
+    ];
+    expect(removeUserPreset(list, 1).map((p) => p.name)).toEqual(['a', 'c']);
+    expect(list.map((p) => p.name)).toEqual(['a', 'b', 'c']);
+    expect(removeUserPreset(list, -1)).toEqual(list);
+    expect(removeUserPreset(list, 3)).toEqual(list);
+    expect(removeUserPreset([], 0)).toEqual([]);
   });
 
   it('suggestPointName never proposes a built-in name (a saved copy would look identical in the list)', () => {

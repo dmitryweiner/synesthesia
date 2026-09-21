@@ -145,6 +145,12 @@ starting points of every exploration.
 - **The help dialog didn't fit small phones**, which left no way to close it:
   it is now a flex column capped at 86vh with the text in a scrollable area
   and the button pinned below.
+- **Saved points can be deleted** (🗑 next to the list). The button only
+  exists while one of your own points is selected — a native `<select>`
+  can't hold per-row buttons, and an always-present button pushed the phone
+  toolbar into a second row. On phones the toolbar is now two deliberate
+  rows: Sound + the point name (readable at last — it had been squeezed to
+  28 px), then the icons.
 - **Phones dimmed the screen while watching.** Screen Wake Lock
   (`src/ui/wakelock.ts`, ported from formula-synth) is taken on the first
   gesture and re-taken when the tab becomes visible again; it degrades

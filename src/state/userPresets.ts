@@ -40,6 +40,12 @@ export function nextPresetNumber(presets: UserPreset[]): number {
   return maxNum + 1;
 }
 
+/** The list without the point at `index` (a new array; bad index → unchanged). */
+export function removeUserPreset(presets: UserPreset[], index: number): UserPreset[] {
+  if (!Number.isInteger(index) || index < 0 || index >= presets.length) return presets;
+  return presets.filter((_, i) => i !== index);
+}
+
 /**
  * Name to offer when saving. Re-saving one of the user's own points offers
  * the same name (overwrite); anything else — including a built-in preset's

@@ -22,7 +22,7 @@ import { decodeStateToken, encodeStateToken } from './state/share';
 import { cleanUrl, parseLaunch, withPresetId } from './state/launch';
 import { fetchPoint, sharePoint } from './state/cloud';
 import { loadLastPoint, saveLastPoint } from './state/lastPoint';
-import { loadUserPresets, saveUserPresets, suggestPointName } from './state/userPresets';
+import { loadUserPresets, saveUserPresets, suggestPointName, removeUserPreset } from './state/userPresets';
 import { keepScreenAwake } from './ui/wakelock';
 import type { UserPreset } from './state/userPresets';
 import { PRESETS, DEFAULT_PRESET_INDEX } from './presets';
@@ -60,6 +60,7 @@ const presetSel = el('presetSel', HTMLSelectElement);
 const undoBtn = el('undoBtn', HTMLButtonElement);
 const reseedBtn = el('reseedBtn', HTMLButtonElement);
 const saveBtn = el('saveBtn', HTMLButtonElement);
+const deleteBtn = el('deleteBtn', HTMLButtonElement);
 const shareBtn = el('shareBtn', HTMLButtonElement);
 const detailsBtn = el('detailsBtn', HTMLButtonElement);
 const helpBtn = el('helpBtn', HTMLButtonElement);
@@ -338,6 +339,26 @@ function boot(): void {
     });
     presetSel.appendChild(builtin);
     presetSel.value = '';
+    refreshDeleteBtn();
+  }
+
+  /**
+   * 🗑 only applies to the user's own points — a native <select> can't hold
+   * per-row buttons. It is hidden unless it applies, so the toolbar stays on
+   * one row on a phone.
+   */
+  function selectedUserPreset(): { index: number; preset: UserPreset } | null {
+    const v = presetSel.value;
+    if (!v.startsWith('u:')) return null;
+    const index = Number(v.slice(2));
+    const preset = userPresets[index];
+    return preset ? { index, preset } : null;
+  }
+
+  function refreshDeleteBtn(): void {
+    const applies = selectedUserPreset() !== null;
+    deleteBtn.disabled = !applies;
+    deleteBtn.hidden = !applies;
   }
 
   // --- actions -----------------------------------------------------------
@@ -348,6 +369,7 @@ function boot(): void {
     stepCount++;
     presetName = undefined;
     presetSel.value = '';
+    refreshDeleteBtn();
     startMorph(explorer.current, seconds);
     refreshUndo();
     const scouted = pick ? ` · scouted: best of ${pick.of} (fractal ${pick.analysis.score.toFixed(2)})` : '';
@@ -434,7 +456,19 @@ function boot(): void {
     flash(reseedBtn, '🌱 Reseeded');
   });
 
+  deleteBtn.addEventListener('click', () => {
+    const selected = selectedUserPreset();
+    if (!selected) return;
+    if (!window.confirm(`Delete the saved point “${selected.preset.name}”?`)) return;
+    saveUserPresets(removeUserPreset(userPresets, selected.index));
+    userPresets = loadUserPresets();
+    if (presetName === selected.preset.name) presetName = undefined; // it's just a point now
+    refreshPresetList();
+    setStatus(`deleted “${selected.preset.name}” — the point itself is still playing`);
+  });
+
   presetSel.addEventListener('change', () => {
+    refreshDeleteBtn();
     const v = presetSel.value;
     if (!v) return;
     const idx = Number(v.slice(2));
@@ -458,6 +492,7 @@ function boot(): void {
     userPresets = loadUserPresets();
     refreshPresetList();
     presetSel.value = `u:${userPresets.findIndex((p) => p.name === s.presetName)}`;
+    refreshDeleteBtn();
     flash(saveBtn, '💾 Saved');
     setStatus(`saved as “${s.presetName}” — it's at the top of the list, under “My points”`);
     onSettled();

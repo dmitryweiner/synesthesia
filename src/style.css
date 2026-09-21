@@ -371,10 +371,30 @@ body {
     display: none;
   }
 
+  /* Two deliberate rows instead of squeezing: row 1 is Sound + the point
+     name (which must stay readable — it was down to 28px), row 2 is the
+     icon buttons spread evenly. Stable whether or not 🗑 is showing. */
   #topbar select {
-    flex: 1;
+    order: 2;
+    flex: 1 1 auto;
     min-width: 0;
     max-width: none;
+  }
+
+  #audioBtn {
+    order: 1;
+  }
+
+  #topbar::after {
+    content: '';
+    order: 3;
+    flex-basis: 100%;
+    height: 0;
+  }
+
+  #topbar > button:not(#audioBtn) {
+    order: 4;
+    flex: 1 1 auto;
   }
 
   .fb-btn {
