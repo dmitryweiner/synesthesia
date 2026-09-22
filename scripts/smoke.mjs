@@ -451,6 +451,31 @@ ctxLabel = 'share-offline';
   await off.close();
 }
 
+// --- the boot probe picks a rung, and the app renders at the one it picked ---
+// (every other page here passes ?res=, which switches the probe off; this is
+// the only place the auto-tuning path runs at all)
+ctxLabel = 'tune';
+{
+  const tuned = await context.newPage();
+  captureErrors(tuned, errors, () => 'tune');
+  await openApp(tuned, withParam(BASE, 'api', worker.url));
+  const settled = await tuned.waitForFunction(() => document.body.dataset.tuned !== undefined, null, { timeout: 60000 })
+    .then(() => true).catch(() => false);
+  check(settled, 'the boot probe never settled on a rung');
+  const d = await tuned.evaluate(() => ({ ...document.body.dataset }));
+  check(/^\d+x\d+$/.test(d.grid ?? ''), `grid not reported: ${d.grid}`);
+  check(/^\d+x\d+$/.test(d.canvas ?? ''), `canvas not reported: ${d.canvas}`);
+  // Software rasterizer: it must NOT have climbed to the top rung, or the
+  // probe is not measuring anything.
+  check(Number(d.tuned) < 5, `probe kept the top rung under SwiftShader (rung ${d.tuned}, ${d.canvas}, grid ${d.grid})`);
+  // The canvas it chose must be no larger than that rung allows.
+  const [cw, ch] = (d.canvas ?? '0x0').split('x').map(Number);
+  const maxSide = [640, 840, 1080, 1280, 1600, Infinity][Number(d.tuned)];
+  check(Math.max(cw, ch) <= maxSide, `canvas ${d.canvas} exceeds rung ${d.tuned} (max side ${maxSide})`);
+  check(await tuned.locator('#webglError').isHidden(), 'WebGL error on the auto-tuned page');
+  await tuned.close();
+}
+
 // --- stop audio ---
 ctxLabel = 'stop';
 await page.locator('#audioBtn').click();

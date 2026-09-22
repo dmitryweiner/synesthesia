@@ -1,12 +1,18 @@
-// A pair of RGBA16F textures + FBOs for the reaction-diffusion state,
-// swapped each substep; resize() preserves content via blitFramebuffer.
+// Render targets for the simulation, swapped each substep for the
+// reaction-diffusion state; resize() preserves content via blitFramebuffer.
+//
+// RG16F, not RGBA16F: every target here holds exactly two channels (state
+// u/v, velocity x/y, paramfield feed/kill offsets) and the other two were
+// dead weight — on a software rasterizer the reaction pass is bound by how
+// much of the state texture it can pull through the cache, so halving the
+// texture halves the pass.
 import type { RenderTarget } from './quad';
 
 function createFloatTarget(gl: WebGL2RenderingContext, width: number, height: number): [WebGLTexture, WebGLFramebuffer] {
   const tex = gl.createTexture();
   if (!tex) throw new Error('gl.createTexture failed.');
   gl.bindTexture(gl.TEXTURE_2D, tex);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, width, height, 0, gl.RGBA, gl.HALF_FLOAT, null);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG16F, width, height, 0, gl.RG, gl.HALF_FLOAT, null);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -35,6 +41,24 @@ function blit(
   gl.blitFramebuffer(0, 0, srcW, srcH, 0, 0, dstW, dstH, gl.COLOR_BUFFER_BIT, gl.LINEAR);
   gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
   gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+}
+
+/**
+ * A 1x1 all-zero RG texture, bound in place of a pass that was skipped
+ * because it would have written nothing but zeros (an off Field variation
+ * card). The reader samples it exactly as it samples the real field.
+ */
+export function createZeroTexture(gl: WebGL2RenderingContext): WebGLTexture {
+  const tex = gl.createTexture();
+  if (!tex) throw new Error('gl.createTexture failed.');
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG16F, 1, 1, 0, gl.RG, gl.FLOAT, new Float32Array([0, 0]));
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  return tex;
 }
 
 export class PingPongTarget {

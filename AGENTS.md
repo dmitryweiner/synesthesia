@@ -25,7 +25,13 @@ npm run analyze   # fractality of the real sound (see "Sound analysis" below);
                   #   picture seeds growth on every hit — tune the detector here);
                   # --switch 0,3,10 --at 12: clicks at preset switches;
                   # --configs 30@22050,24@8000: does a cheap render rank like
-                  #   an expensive one (Spearman ρ)?
+                  #   an expensive one (Spearman ρ)?;
+                  # --render [--grid 1024,256] [--scale 0,1280] [--size WxH]:
+                  #   FPS of the real rAF loop per configuration (--grid 0 =
+                  #   let the boot probe choose, and see what it chose);
+                  # --render --passes: ms per PASS — a 1-px readPixels is a
+                  #   real barrier where gl.finish() is not, and timing step()
+                  #   at speed 1 vs 11 splits one react substep from the rest
 npm run build     # tsc + vite build into ./docs (GitHub Pages) — commit docs/
 npm run check:cloud   # cloud/ Worker: tsc + Miniflare tests (npm install in cloud/ once)
 npm run deploy:cloud  # D1 migrations --remote + wrangler deploy (wrangler is authorized)
@@ -53,6 +59,9 @@ every guess cost a round trip:
 | what did the user's "harsh beating" come from? | `tests/continuity.test.ts` (HF roughness ratio) | absolute-time oscillators: ×17–22 rougher after 60 s |
 | do preset switches click? | `analyze.mjs --switch` | 2 clicks → 0 after switchTo() |
 | are the built-in presets actually "fractal"? | `analyze.mjs --random 12` | presets 0.79±0.14 vs random 0.55±0.31 |
+| why 0.57 fps on a 1080p board with no GPU? | `analyze.mjs --render --passes` | react×16 = 1406 ms of 1764 (80%), *not* the noise fields (120 ms, 7%) — a C cost model had said the opposite |
+| how much does the canvas cost on its own? | `--render --grid 64` (grid made negligible) | 262 ms at 1920×1031, 128 at 1280×671, 46 at 640×271 — it does not shrink with `?res=` |
+| did the render changes actually help? | `--render` / `--render --passes`, base vs new snapshots, interleaved | same configuration 2.0×; default point 0.57 → 10.8 fps |
 
 Corollaries:
 - A metric that runs in vitest beats one that needs a browser: the pure
@@ -88,6 +97,19 @@ Corollaries:
   always-visible button squeezes the name to an unreadable stub — measure
   `#pointsBtn` width at 390 px after touching the toolbar, and remember
   `#topbar > button:not(#audioBtn)` outweighs a plain `#id` rule.
+- **Timing the frame loop needs a real barrier, and `gl.finish()` is not
+  one.** GL commands are queued to the GPU process, so counting rAF
+  callbacks measures how fast frames are *enqueued*: the identical
+  configuration read as 0.3 fps or 2.9 fps depending on how deep the queue
+  had grown, and `gl.finish()` returned without the raster having happened.
+  A 1-pixel `gl.readPixels` does block (it has to hand back real pixels) —
+  that is what `--render`, `--render --passes` and `SimEngine.syncFrame()`
+  all use, and with it the same configuration repeats to ±2%.
+- **Throw away the first render in a fresh browser.** SwiftShader JIT-compiles
+  the shaders in the GPU process, which outlives the tab, so the first page
+  measures ~8× slower than every later one at the identical configuration
+  (0.29 fps, then 2.73, 2.36, 2.53). No warm-up *inside* the page covers it;
+  `--render` opens and closes a throwaway page first.
 - **Long analysis runs die when you edit `src/`** (Vite full-reloads the
   page). Run them against a snapshot on another port instead:
   `rsync -a --exclude node_modules --exclude docs --exclude shots --exclude .git ./ $SNAP/`,
@@ -98,7 +120,13 @@ Corollaries:
 
 - WebGL runs in software: 1–5 fps at 1024², cold first load ~17 s. Scripts
   pass `?res=128` (smoke default) — a big grid starves the CPU enough for a
-  second tab's `goto` to time out.
+  second tab's `goto` to time out. `?res=`/`?scale=` also switch the boot
+  probe off, so a script gets the configuration it asked for.
+- **Another session on this machine invalidates every fps number.** The
+  benches here are CPU-bound; a parallel `parity.mjs`/`cargo` run pushed the
+  same configuration from 180 ms to 696 ms a frame. Check `/proc/loadavg`
+  before trusting a number, and measure before/after **interleaved** (two
+  snapshots on two ports, alternating) rather than one after the other.
 - Never sleep for boot: `openApp()` in scripts/lib.mjs waits for
   `body[data-ready="1"]` (set at the end of `boot()` in main.ts). Fixed
   800 ms sleeps raced the help dialog, which opened after the click.
@@ -168,7 +196,12 @@ src/schema/visual.ts   cards: reaction, fieldVariation, flow, palette
                        (Veins/Pour/Brush deliberately not ported — PLAN.md #2)
 src/sim/               SimEngine (WebGL2) + shaders + pure params; grid.ts
                        sizes the grid to the canvas aspect (square texels) and
-                       shaders take uAspect so noise/spots stay isotropic
+                       shaders take uAspect so noise/spots stay isotropic.
+                       quality.ts: the ladder of (canvas cap, res) rungs and
+                       the boot probe that walks up it (PLAN.md #12). The
+                       engine skips a pass whose output would change nothing,
+                       reuses paramfield/velocity while their inputs are
+                       unchanged, and renders both at half the grid's side
 src/palette.ts         5 cosine palettes (order = PALETTE_NAMES)
 src/state/schema.ts    AppState v1 {audio, visual, mod, coupling}; tolerant
                        sanitizeState + clamping stateToAppState; isModTarget

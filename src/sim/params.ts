@@ -98,3 +98,23 @@ export const PEARSON_POINTS: readonly PearsonPoint[] = [
   { name: 'Mitosis', feed: 0.0367, kill: 0.0649 },
   { name: 'Worms', feed: 0.078, kill: 0.061 },
 ];
+
+// --- what a pass can skip ------------------------------------------------
+// paramfield and velocity cost a full grid of fbm no matter what their
+// amounts are (10 fbm4 evaluations per cell), and advect costs a full-grid
+// texture copy. On a GPU that is noise; on a software rasterizer it is the
+// difference between a frame and a slideshow, so the engine asks first.
+
+/** Does the paramfield perturb feed/kill at all? Scale/warp alone do not. */
+export function paramFieldActive(f: Readonly<FieldVariationParams>): boolean {
+  return f.feedVarAmount !== 0 || f.killVarAmount !== 0;
+}
+
+/**
+ * Does advection move anything? With no amount — or an everywhere-zero
+ * velocity — advect.frag degenerates to an identity copy of the state, and
+ * the velocity field it would sample is never looked at either.
+ */
+export function advectActive(f: Readonly<FlowParams>): boolean {
+  return f.advectAmount !== 0 && (f.curlStrength !== 0 || f.driftX !== 0 || f.driftY !== 0);
+}

@@ -17,5 +17,5 @@ void main() {
   float blob = smoothstep(uRadius, uRadius * 0.3, length(d)) * uAmount;
   float v = max(s.g, blob * 0.5);
   float u = mix(s.r, 0.5, blob);
-  fragColor = vec4(u, v, s.ba);
+  fragColor = vec4(u, v, 0.0, 1.0);
 }

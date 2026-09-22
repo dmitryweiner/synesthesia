@@ -60,10 +60,19 @@ you don't, and the search follows.
 
 Keys: ← 👎 · → 👍 · ↑ 🎲 · Backspace ↩ · Space ▶ sound.
 
+How big it renders is **measured, not guessed**: the first frames of the
+real loop walk up a quality ladder (`src/sim/quality.ts`) and stop at the
+richest grid + canvas the machine holds at ~20 fps. That is decided once, at
+startup, and never moves afterwards, so the picture cannot degrade while you
+are watching it. You may see it sharpen over the first half-second.
+
 URL parameters: `?presetId=<id>` opens a shared point, `?preset=N` opens
-built-in preset N, `?res=N` sets the simulation grid (default 1024, 512 on
-small screens), `?scout=0` turns the scout off. (`?api=http://localhost:…`
-points Share at a local Worker — development only.)
+built-in preset N, `?res=N` sets the simulation grid, `?scale=N` caps the
+longest side of the canvas backing store in device pixels (`0` = no cap),
+`?scout=0` turns the scout off. Either `?res=` or `?scale=` switches the
+startup measurement off, so a link — or a script — renders exactly what it
+asks for. (`?api=http://localhost:…` points Share at a local Worker —
+development only.)
 
 ## Development
 
@@ -127,6 +136,8 @@ node scripts/analyze.mjs --mutants 5 --configs 30@22050,8@16000
 node scripts/analyze.mjs --preset 0 --wav shots/wav
 node scripts/analyze.mjs --switch 0,3,10,7 --at 12  # clicks at preset switches
 node scripts/analyze.mjs --onsets                  # onset hits per preset at 60/30/15 fps
+node scripts/analyze.mjs --render                  # frames per second, per grid × canvas
+node scripts/analyze.mjs --render --passes         # ms per pass (fields / react / display)
 ```
 
 First results: built-in presets score 0.79 ± 0.14 against 0.55 ± 0.31 for

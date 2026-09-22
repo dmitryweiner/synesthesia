@@ -22,6 +22,20 @@
 //       # src/audio/features.ts: struck/dripping presets should fire on
 //       # (nearly) every attack, drones almost never, and the counts must
 //       # not collapse at a low frame rate.
+//   node scripts/analyze.mjs --render [--grid 1024,512,256] [--scale 0,720]
+//       [--size 1920x1080] [--preset 0] [--secs 6]
+//       # FRAMES PER SECOND of the real rAF loop (not sound): opens the app
+//       # per configuration and counts presented frames. The only number the
+//       # rendering work is judged by — a per-pass breakdown from JS is not
+//       # available (the raster happens in the GPU process, so a finish()
+//       # around drawArrays reports ~0). Software rasterizer here, so treat
+//       # the absolute value as this machine's, and compare configurations
+//   node scripts/analyze.mjs --render --passes [--grid 1024] [--size 1920x1080]
+//       # milliseconds per PASS, not per frame. A gl.finish() around
+//       # drawArrays reports ~0 (the raster happens in the GPU process), but
+//       # a 1-pixel readPixels is a real barrier: every queued command must
+//       # complete first. Timing step() at speed 1 and at speed 11 separates
+//       # one Gray-Scott substep from the fields+advect block around it.
 //   node scripts/analyze.mjs --switch 0,3,10,7 [--at 20] [--wav shots/sw]
 //       # preset switches through the live applyState path: plays each preset
 //       # for --at seconds, then switches to the next; reports clicks
@@ -32,18 +46,187 @@
 // (box-counting dimension of the spectrogram's loudest cells), dB.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { parseFlags, ensureServer, launchBrowser, captureErrors, openApp } from './lib.mjs';
+import { parseFlags, ensureServer, launchBrowser, captureErrors, openApp, withParam } from './lib.mjs';
 
-const { flags } = parseFlags(process.argv.slice(2), ['preset', 'hash', 'secs', 'sr', 'mutants', 'random', 'wav', 'json', 'seed', 'configs', 'switch', 'at', 'fps']);
+const { flags } = parseFlags(process.argv.slice(2), ['preset', 'hash', 'secs', 'sr', 'mutants', 'random', 'wav', 'json', 'seed', 'configs', 'switch', 'at', 'fps', 'grid', 'scale', 'size', 'warm', 'reps']);
 const SECS = Number(flags.get('secs') ?? 30);
 const SR = Number(flags.get('sr') ?? 22050);
 const MUTANTS = Number(flags.get('mutants') ?? 0);
 const RANDOM = Number(flags.get('random') ?? 0);
 const SEED = Number(flags.get('seed') ?? 1);
 
+const fmt = (v, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : '  — ');
+const pad = (s, n) => String(s).padEnd(n).slice(0, n);
+
 const { BASE, stop } = await ensureServer(false);
 const errors = [];
 const browser = await launchBrowser();
+
+// --render: how many frames a second the app actually paints. Its own branch
+// because every configuration needs its own window size, which means its own
+// browser context — the other modes share one page and never draw.
+if (flags.has('render') && flags.has('passes')) {
+  const [w, h] = (flags.get('size') ?? '1920x1080').split('x').map(Number);
+  const grids = (flags.get('grid') ?? '1024,512,256').split(',').map(Number);
+  const preset = Number(flags.get('preset') ?? 0);
+  const reps = Number(flags.get('reps') ?? 4);
+  const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 1 });
+  const pp = await ctx.newPage();
+  captureErrors(pp, errors, () => 'passes');
+  await openApp(pp, `${BASE}/?res=64`);
+  await pp.waitForTimeout(6000); // let the GPU process JIT the shaders (see --render)
+  console.log(`per pass, ms — canvas ${w}x${h}, preset ${preset}, mean of ${reps}`);
+  console.log(`${pad('res', 6)} ${pad('grid', 11)} ${pad('fields', 9)} ${pad('react×1', 9)} ${pad('react×N', 10)} ${pad('display', 9)} frame at this preset's speed`);
+  for (const res of grids) {
+    const r = await pp.evaluate(async ({ res, w, h, preset, reps }) => {
+      const { SimEngine } = await import('/src/sim/engine.ts');
+      const { gridSize } = await import('/src/sim/grid.ts');
+      const { reactionParamsFromCard, fieldVariationParamsFromCard, flowParamsFromCard, ZERO_FIELD_VARIATION, ZERO_FLOW } = await import('/src/sim/params.ts');
+      const { composePalette, palettesByIndex } = await import('/src/palette.ts');
+      const { PRESETS } = await import('/src/presets.ts');
+      const cards = PRESETS[preset].state.visual.cards;
+      const cv = document.createElement('canvas');
+      cv.width = w;
+      cv.height = h;
+      const g = gridSize(res, w, h);
+      const sim = new SimEngine({ canvas: cv, ...g });
+      sim.reaction = reactionParamsFromCard(cards.reaction.params);
+      sim.fieldVariation = cards.fieldVariation.on ? fieldVariationParamsFromCard(cards.fieldVariation.params) : { ...ZERO_FIELD_VARIATION };
+      sim.flow = cards.flow.on ? flowParamsFromCard(cards.flow.params) : { ...ZERO_FLOW };
+      const p = cards.palette.params;
+      const pal = composePalette(palettesByIndex(p.paletteId), p.shift, p.contrast, p.bands, p.relief, p.lightAngle, p.gloss);
+      // GL commands run in order, so a readPixels forces everything queued
+      // before it to finish. Read a 1x1 FBO of our own, never the default
+      // framebuffer — that one resolves the whole swap chain and costs more
+      // than the pass being measured.
+      const gl = sim.gl;
+      const px = new Uint8Array(4);
+      const dot = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, dot);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      const dotFbo = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, dotFbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, dot, 0);
+      const barrier = () => {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, dotFbo);
+        gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      };
+      const time = (fn) => {
+        fn();
+        barrier();
+        const t0 = performance.now();
+        for (let i = 0; i < reps; i++) fn();
+        barrier();
+        return (performance.now() - t0) / reps;
+      };
+      const step = (speed) => time(() => { sim.reaction.speed = speed; sim.step(); });
+      const floor = time(() => {}); // what the barrier itself adds to every row
+      const s1 = step(1);
+      const s11 = step(11);
+      const react = (s11 - s1) / 10;
+      const display = time(() => sim.render(pal));
+      return { grid: `${g.width}x${g.height}`, fields: s1 - react - floor, react, display: display - floor, floor, speed: Math.max(1, Math.round(sim.reaction.speed)) };
+    }, { res, w, h, preset, reps });
+    const frame = r.fields + r.react * r.speed + r.display;
+    console.log(`${pad(res, 6)} ${pad(r.grid, 11)} ${pad(fmt(r.fields, 1), 9)} ${pad(fmt(r.react, 1), 9)} ${pad(fmt(r.react * r.speed, 1), 10)} ${pad(fmt(r.display, 1), 9)} ${fmt(frame, 0)} ms = ${fmt(1000 / frame)} fps  (×${r.speed} substeps, barrier ±${fmt(r.floor, 1)})`);
+  }
+  await ctx.close();
+  await browser.close();
+  stop();
+  if (errors.length) console.error('errors:', errors);
+  process.exit(errors.length ? 2 : 0);
+}
+
+if (flags.has('render')) {
+  const sizes = (flags.get('size') ?? '1920x1080').split(',');
+  const grids = (flags.get('grid') ?? '1024,512,256').split(',').map(Number);
+  const scales = (flags.get('scale') ?? '0').split(',').map(Number);
+  const preset = Number(flags.get('preset') ?? 0);
+  const secs = Number(flags.get('secs') ?? 6);
+  const warm = Number(flags.get('warm') ?? 3);
+  // THROW THE FIRST CONFIGURATION AWAY. The first page to render in a fresh
+  // browser measures ~8x slower than every later one at the identical
+  // configuration (SwiftShader JIT-compiles the shaders in the GPU process,
+  // which outlives the tab), and no amount of warm-up inside the page covers
+  // it. Measured: 1024 @ 1920x1080 reads 0.29 fps first, then 2.73, 2.36,
+  // 2.53 — so a run that does not do this compares its first row against
+  // everything else.
+  {
+    const ctx = await browser.newContext({ viewport: { width: 640, height: 400 }, deviceScaleFactor: 1 });
+    const wp = await ctx.newPage();
+    await openApp(wp, `${BASE}/?preset=${preset}&res=256`);
+    await wp.waitForTimeout(6000);
+    await ctx.close();
+  }
+  for (const size of sizes) {
+    const [w, h] = size.split('x').map(Number);
+    console.log(`window ${w}x${h}, preset ${preset}, ${secs}s measured after ${warm}s warm-up`);
+    console.log(`${pad('res', 6)} ${pad('scale', 7)} ${pad('canvas', 11)} ${pad('grid', 11)} ${pad('fps', 7)} ${pad('mean ms', 9)} p95 ms`);
+    for (const res of grids) {
+      for (const scale of scales) {
+        const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 1 });
+        const rp = await ctx.newPage();
+        captureErrors(rp, errors, () => `${res}@${size}+${scale}`);
+        let url = withParam(`${BASE}/?preset=${preset}`, 'res', res);
+        url = withParam(url, 'scale', scale);
+        await openApp(rp, url);
+        const r = await rp.evaluate(async ({ secs, warm }) => {
+          const c = document.getElementById('view');
+          // The same context the app draws with (getContext returns the live
+          // one). Counting rAF callbacks alone measures how fast the main
+          // thread ENQUEUES frames, not how fast they are rasterized — the
+          // passes run in the GPU process, so the loop races ahead and the
+          // identical configuration reads as 0.3 fps or 2.9 fps depending on
+          // how deep the queue is. gl.finish() does NOT fix that here (it
+          // returns without the raster having happened); a 1-pixel
+          // readPixels does, because it has to hand back real pixels.
+          const gl = c.getContext('webgl2');
+          const px = new Uint8Array(4);
+          const drain = gl
+            ? () => {
+              gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+              gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+            }
+            : () => {};
+          const wait = (ms) => new Promise((done) => {
+            const t0 = performance.now();
+            const tick = () => {
+              drain();
+              return performance.now() - t0 >= ms ? done() : requestAnimationFrame(tick);
+            };
+            requestAnimationFrame(tick);
+          });
+          await wait(warm * 1000);
+          const dts = await new Promise((done) => {
+            const out = [];
+            let prev = performance.now();
+            const t0 = prev;
+            const tick = () => {
+              drain();
+              const now = performance.now();
+              out.push(now - prev);
+              prev = now;
+              if (now - t0 >= secs * 1000) done(out);
+              else requestAnimationFrame(tick);
+            };
+            requestAnimationFrame(tick);
+          });
+          return { dts, canvas: `${c.width}x${c.height}`, grid: document.body.dataset.grid ?? '?', synced: !!gl };
+        }, { secs, warm });
+        const dts = r.dts.slice().sort((a, b) => a - b);
+        const mean = r.dts.reduce((a, b) => a + b, 0) / r.dts.length;
+        const p95 = dts[Math.min(dts.length - 1, Math.floor(dts.length * 0.95))];
+        console.log(`${pad(res, 6)} ${pad(scale || 'off', 7)} ${pad(r.canvas, 11)} ${pad(r.grid, 11)} ${pad(fmt(1000 / mean), 7)} ${pad(fmt(mean, 0), 9)} ${fmt(p95, 0)}${r.synced ? '' : '  (NOT GPU-synced)'}`);
+        await ctx.close();
+      }
+    }
+  }
+  await browser.close();
+  stop();
+  if (errors.length) console.error('errors:', errors);
+  process.exit(errors.length ? 2 : 0);
+}
+
 const page = await browser.newPage();
 captureErrors(page, errors);
 await openApp(page, `${BASE}/?res=64`);
@@ -79,9 +262,6 @@ const candidates = await page.evaluate(async ({ presetArg, hash, mutants, random
   }
   return JSON.parse(JSON.stringify(out));
 }, { presetArg: flags.get('preset') ?? '', hash: flags.get('hash') ?? '', mutants: MUTANTS, random: RANDOM, seed: SEED });
-
-const fmt = (v, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : '  — ');
-const pad = (s, n) => String(s).padEnd(n).slice(0, n);
 
 async function renderScore(state, secs, sr) {
   return page.evaluate(async ({ state, secs, sr }) => {

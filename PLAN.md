@@ -219,6 +219,79 @@ can refuse a save were both removed instead of guessing:
     The panel (`src/ui/pointList.ts`) shows *My points* with a 🗑 on each
     row, then the built-ins, and the toolbar button shows what is playing.
 
+## Decisions after profiling on a GPU-less machine (agreed with the user, 2026-09-22)
+
+12. **How big to render is measured at boot, not guessed.** Reported from an
+    Orange Pi 4 Pro (Allwinner A733, 1080p, Debian 13): `/dev/dri` has only
+    the display controller — no render node, no GPU driver — so every pass is
+    rasterized on the CPU. The app ran the default point at **0.4 fps** in a
+    maximized window, because `simResolution()` decided from
+    `min(innerWidth, innerHeight) < 700` and a 1080p board passes that test.
+    - *Measured first, and it contradicted the guess.* A hand-written C cost
+      model had said the noise fields were ~60% of the frame. On the real
+      rasterizer (`analyze.mjs --render --passes`, new) the frame at
+      res 1024 / 1920×1080 is **react ×16 = 1406 ms (80%), display = 238 ms
+      (13%), the two noise fields = 120 ms (7%)**: the reaction dominates,
+      and the C model missed it because react.frag's cost is texture
+      sampling, not arithmetic. With the grid made negligible, the canvas
+      alone costs 262 ms at 1920×1031 against 128 ms at 1280×671 and 46 ms at
+      640×271 — `display.frag` is the one pass that never shrank with
+      `?res=`.
+    - *A ladder of rungs, walked upwards.* `src/sim/quality.ts` pairs a
+      canvas cap with a grid: `640/192 → 840/256 → 1080/384 → 1280/512 →
+      1600/768 → uncapped/1024` (~2× of work per step). The first frames of
+      the real loop render at each rung and keep the richest one whose median
+      frame is ≤ 50 ms (20 fps — the 15 fps floor minus what the audio thread
+      and the scout will take). It walks *up* so the worst case is one frame
+      of the rung above the machine's ceiling, not one frame at full quality
+      (2.6 s here); the picture sharpens over the first half-second.
+    - *Once, at boot — no live governor.* Chosen deliberately: a rolling
+      step-down would change the picture under a viewer mid-listen. A resize
+      re-applies the same rung, it does not re-probe.
+    - *`?scale=N`* caps the longest side of the canvas backing store in
+      device pixels (`0` = no cap); the CSS size stays 100%, so the upscale
+      is a blit. Either `?res=` or `?scale=` switches the probe off, so
+      scripts and links stay deterministic — which is also why the smoke has
+      one page with neither, to exercise the probe at all.
+    - *`speed` is never capped automatically.* It is the number of reaction
+      substeps per frame, so cutting it halves how fast the pattern evolves
+      per second of wall clock and `uDt` cannot compensate (the scheme is at
+      its stability limit). Grid and canvas come down instead.
+    - *Result on the reported machine* (1920×1080, default point, headless
+      software rasterizer, before → after): **0.57 fps → 10.8 fps**, of which
+      2.0× comes from the passes themselves (below) and the rest from
+      choosing a rung the machine can hold. In a 1280×720 window it reaches
+      12.5 fps and at 640×360, 15.8. The ≥15 fps the backlog asked for is
+      therefore met below 720p and not at full 1080p: there the canvas alone
+      (backing store plus the compositor's upscale) is ~46 ms of the 93 ms
+      frame, and no further rung would buy much.
+13. **The noise fields render at half the grid's side.** `paramfield` and
+    `velocity` are 4-octave fbm and a curl field — smooth by construction,
+    and both are read by UV with LINEAR filtering — so a quarter of the cells
+    costs a quarter of the ten fbm evaluations per cell for detail that is
+    not there. Verified by eye on *Fractal garden* and on *Bell spots* (the
+    finest noise scale in the built-ins): same pattern family, same blob
+    size, no aliasing or moiré. Rejected alongside it: recomputing the fields
+    only every N frames. It would have saved little once they were at half
+    resolution, and the presets' LFO routes into `flow` would have made the
+    drift visibly step.
+
+    The engine also stopped paying for passes that change nothing (an off
+    Field variation card now binds a 1×1 zero texture instead of running
+    `paramfield`; advection with no amount or a zero velocity is an identity
+    copy and is skipped with its velocity pass), and reuses either field
+    while its inputs are unchanged. Those are exact no-ops, not trade-offs.
+
+    Two more changes with no visual consequence at all carried most of the
+    per-pass win: the simulation targets are **RG16F, not RGBA16F** (every
+    one of them holds two channels; the other two were dead bandwidth), and
+    **react.frag reads with `texelFetch`, not `texture`** — its 9-point
+    stencil lands exactly on texel centres, so the bilinear filter had
+    nothing to interpolate, and hand-clamped integer coordinates give the
+    same zero-flux boundary `CLAMP_TO_EDGE` did. Measured per pass at
+    res 1024 / 1920×1080, before → after: **react 87.9 → 36.2 ms a substep,
+    the noise fields 120 → 42 ms, display 238 → 205 ms.**
+
 ## Architecture
 
 ```

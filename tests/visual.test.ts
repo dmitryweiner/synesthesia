@@ -2,6 +2,7 @@ import { CARDS, cardDef, cardSliderRanges, isCardId, isVisualModTarget, PALETTE_
 import {
   DEFAULT_REACTION_PARAMS, ZERO_FIELD_VARIATION, ZERO_FLOW,
   reactionParamsFromCard, fieldVariationParamsFromCard, flowParamsFromCard, PEARSON_POINTS,
+  paramFieldActive, advectActive,
 } from '../src/sim/params';
 import { BUILTIN_PALETTES, composePalette, hexToVec3, palettesByIndex } from '../src/palette';
 
@@ -57,6 +58,25 @@ describe('sim/params', () => {
   it('flow round-trips all six fields', () => {
     const src = { curlStrength: 0.01, curlScale: 2, driftX: 0.001, driftY: -0.002, advectAmount: 0.3, evolveRate: 0.02 };
     expect(flowParamsFromCard(src)).toEqual(src);
+  });
+
+  // Both passes cost a full grid of fbm whatever their amounts are, so the
+  // engine has to know when running them changes nothing at all.
+  it('paramFieldActive: only the two amounts decide — scale/warp alone perturb nothing', () => {
+    expect(paramFieldActive(ZERO_FIELD_VARIATION)).toBe(false);
+    expect(paramFieldActive({ ...ZERO_FIELD_VARIATION, feedVarScale: 12, feedVarWarp: 3 })).toBe(false);
+    expect(paramFieldActive({ ...ZERO_FIELD_VARIATION, feedVarAmount: 0.001 })).toBe(true);
+    expect(paramFieldActive({ ...ZERO_FIELD_VARIATION, killVarAmount: 0.001 })).toBe(true);
+  });
+
+  it('advectActive: no amount, or nothing to advect by, = an identity copy of the state', () => {
+    const flow = { ...ZERO_FLOW, curlStrength: 0.01, advectAmount: 0.3 };
+    expect(advectActive(flow)).toBe(true);
+    expect(advectActive({ ...flow, advectAmount: 0 })).toBe(false);
+    expect(advectActive({ ...flow, curlStrength: 0 })).toBe(false);
+    expect(advectActive({ ...flow, curlStrength: 0, driftX: -0.002 })).toBe(true);
+    expect(advectActive({ ...flow, curlStrength: 0, driftY: 0.002 })).toBe(true);
+    expect(advectActive(ZERO_FLOW)).toBe(false);
   });
 
   it('Pearson points sit inside the reaction slider ranges', () => {

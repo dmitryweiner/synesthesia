@@ -7,6 +7,7 @@ import { el, make } from './ui/dom';
 import { renderDetails } from './ui/details';
 import { SimEngine } from './sim/engine';
 import { gridSize } from './sim/grid';
+import { QUALITY_LADDER, QualityProbe, TOP_RUNG, backingStore } from './sim/quality';
 import { AudioEngine } from './audio/engine';
 import { FeatureTracker, OnsetDetector, SILENT_FEATURES } from './audio/features';
 import type { AudioFeatures } from './audio/features';
@@ -86,10 +87,11 @@ const VISUAL_RANGES: Record<string, Record<string, readonly [number, number]>> =
 for (const card of CARDS) VISUAL_RANGES[card.id] = cardSliderRanges(card);
 
 function resizeCanvas(): void {
-  const dpr = window.devicePixelRatio || 1;
   const rect = canvas.getBoundingClientRect();
-  canvas.width = Math.max(1, Math.floor(rect.width * dpr));
-  canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+  const store = backingStore(canvasCap(), rect.width, rect.height, window.devicePixelRatio || 1);
+  canvas.width = store.width;
+  canvas.height = store.height;
+  document.body.dataset.canvas = `${store.width}x${store.height}`;
 }
 
 // Button text is "<icon> <label>"; they're split into two spans so narrow
@@ -118,8 +120,11 @@ for (const btn of document.querySelectorAll('button.tb-btn, button.fb-btn')) {
   if (btn instanceof HTMLButtonElement) setBtnText(btn, (btn.textContent ?? '').trim());
 }
 
-// `?res=N` overrides the simulation grid (64..2048) — for weak devices and
-// for the headless scripts, where SwiftShader renders a few fps at 1024².
+// `?res=N` overrides the simulation grid (64..2048) and `?scale=N` caps the
+// longest side of the canvas backing store in device pixels (0 = no cap) —
+// for weak devices and for the headless scripts, where SwiftShader renders a
+// few fps at 1024². Either one also switches the boot probe off, so a script
+// measures the configuration it asked for and nothing else.
 // `?api=` points Share at a local points Worker (scripts/smoke.mjs runs one
 // in Miniflare). Only localhost is honored, so a crafted link can't send
 // people's points to someone else's server.
@@ -135,10 +140,38 @@ function apiOverride(): string | undefined {
   return undefined;
 }
 
+function intParam(name: string, min: number, max: number): number | undefined {
+  const raw = new URLSearchParams(location.search).get(name);
+  if (raw === null) return undefined;
+  const v = Number(raw);
+  if (!Number.isFinite(v) || v < 0) return undefined;
+  return v === 0 ? 0 : Math.min(max, Math.max(min, Math.round(v)));
+}
+
+const RES_OVERRIDE = intParam('res', 64, 2048) || undefined; // 0 is not a grid
+const SCALE_OVERRIDE = intParam('scale', 64, 8192);          // 0 = uncapped, on purpose
+
+// How big to render. Without an override, the first frames of the real loop
+// pick a rung of QUALITY_LADDER and then it is fixed for the session (agreed
+// with the user: measured once at boot, never moved under the viewer). The
+// old test was `min(innerWidth, innerHeight) < 700` — a device test that a
+// 1080p board with no GPU at all passes, and then renders at 0.4 fps.
+const probe = RES_OVERRIDE === undefined && SCALE_OVERRIDE === undefined ? new QualityProbe() : null;
+// Frames to let pass before the probe believes anything: shader compilation,
+// the opening morph and the point load all land in the first few and none of
+// them is the steady state.
+const BOOT_WARMUP_FRAMES = 8;
+
+function currentRung(): number {
+  return probe ? probe.rung : TOP_RUNG;
+}
+
 function simResolution(): number {
-  const q = Number(new URLSearchParams(location.search).get('res'));
-  if (Number.isFinite(q) && q >= 64) return Math.min(2048, Math.round(q));
-  return Math.min(window.innerWidth, window.innerHeight) < 700 ? 512 : 1024;
+  return RES_OVERRIDE ?? QUALITY_LADDER[currentRung()].res;
+}
+
+function canvasCap(): number {
+  return SCALE_OVERRIDE ?? QUALITY_LADDER[currentRung()].maxSide;
 }
 
 function boot(): void {
@@ -151,11 +184,25 @@ function boot(): void {
     status.textContent = err instanceof Error ? err.message : 'WebGL2 unavailable.';
     return;
   }
-  window.addEventListener('resize', () => {
+  // Canvas and grid always move together: the display pass is bound by the
+  // one and every reaction substep by the other.
+  function applyQuality(): void {
     resizeCanvas();
     const g = gridSize(simResolution(), canvas.width, canvas.height);
     sim.setGrid(g.width, g.height);
-  });
+    document.body.dataset.grid = `${g.width}x${g.height}`;
+  }
+  applyQuality();
+  window.addEventListener('resize', applyQuality);
+
+  let framesSeen = 0;
+  /** Feeds the boot probe one real frame time (unclamped: a 2 s frame must read as 2 s). */
+  function tune(frameMs: number): void {
+    if (!probe || probe.done) return;
+    if (++framesSeen <= BOOT_WARMUP_FRAMES) return;
+    if (probe.frame(frameMs)) applyQuality();
+    if (probe.done) document.body.dataset.tuned = String(probe.rung);
+  }
 
   const audio = new AudioEngine();
   let features: AudioFeatures = { ...SILENT_FEATURES };
@@ -721,8 +768,10 @@ function boot(): void {
   function loop(): void {
     tickMorph();
     const now = performance.now() / 1000;
-    const dt = lastFrame > 0 ? Math.min(0.25, now - lastFrame) : 1 / 60;
+    const since = lastFrame > 0 ? now - lastFrame : 0;
+    const dt = lastFrame > 0 ? Math.min(0.25, since) : 1 / 60;
     lastFrame = now;
+    tune(since * 1000);
 
     const analyser = audio.analyser;
     if (analyser && tracker) {
@@ -746,6 +795,10 @@ function boot(): void {
       fx,
       ripples.pack(now),
     );
+    // While the probe is choosing: make the next frame interval mean "this
+    // frame was drawn", not "this frame was queued". Never after that — it
+    // costs a swap-chain resolve every frame.
+    if (probe && !probe.done) sim.syncFrame();
     requestAnimationFrame(loop);
   }
 

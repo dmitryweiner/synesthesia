@@ -1,3 +1,8 @@
+// Field -> color. THE ONE PASS THAT DOES NOT SHRINK WITH `?res=`: it runs
+// once per canvas pixel, so the canvas backing store (src/sim/quality.ts)
+// is what bounds it, and the exp/pow it used to do per pixel are written
+// out as multiplies — a scalar rasterizer pays for those, a GPU does not.
+//
 // Field -> color: an iq-style cosine gradient (a/b/c/d already carry the
 // Palette card's shift/contrast — see src/palette.ts composePalette), plus a
 // bump-mapped relief pass that makes a flat gradient lookup read as "stone"
@@ -21,7 +26,7 @@ uniform vec3 uPalC;
 uniform vec3 uPalD;
 uniform float uBands;
 uniform float uRelief;
-uniform float uLightAngle;
+uniform vec3 uLightDir; // normalized on the CPU — sin/cos of a uniform, per pixel, is not free
 uniform float uGloss;
 uniform float uAspect;
 uniform float uExposure;
@@ -54,7 +59,8 @@ void main() {
     if (r.w <= 0.0) continue;
     vec2 d = (vUv - r.xy) * vec2(uAspect, 1.0);
     float dist = length(d);
-    float ring = exp(-pow((dist - r.z * RIPPLE_SPEED) / RIPPLE_WIDTH, 2.0));
+    float g = (dist - r.z * RIPPLE_SPEED) / RIPPLE_WIDTH;
+    float ring = exp(-g * g);
     float fade = r.w * (1.0 - r.z / RIPPLE_LIFE);
     float wave = ring * fade;
     vec2 dir = dist > 1e-5 ? d / dist : vec2(0.0);
@@ -81,10 +87,13 @@ void main() {
   float hU = heightAt(uv + vec2(0.0, uTexel.y));
   vec3 normal = normalize(vec3((hL - hR) * uRelief, (hD - hU) * uRelief, 1.0));
 
-  vec3 lightDir = normalize(vec3(cos(uLightAngle), sin(uLightAngle), 0.6));
-  float diffuse = max(dot(normal, lightDir), 0.0);
-  vec3 reflectDir = reflect(-lightDir, normal);
-  float specular = pow(max(reflectDir.z, 0.0), 24.0) * (uGloss + uFlash * 1.5);
+  float diffuse = max(dot(normal, uLightDir), 0.0);
+  vec3 reflectDir = reflect(-uLightDir, normal);
+  float z = max(reflectDir.z, 0.0);
+  float z2 = z * z;
+  float z4 = z2 * z2;
+  float z8 = z4 * z4;
+  float specular = z8 * z8 * z8 * (uGloss + uFlash * 1.5); // pow(z, 24), unrolled
 
   col *= 0.55 + 0.55 * diffuse;
   col += specular;
