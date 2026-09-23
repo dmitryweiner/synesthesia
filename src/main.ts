@@ -9,6 +9,7 @@ import { SimEngine } from './sim/engine';
 import { gridSize } from './sim/grid';
 import { QUALITY_LADDER, QualityProbe, TOP_RUNG, backingStore } from './sim/quality';
 import { AudioEngine } from './audio/engine';
+import { IosAudioUnlock } from './audio/iosUnlock';
 import { FeatureTracker, OnsetDetector, SILENT_FEATURES } from './audio/features';
 import type { AudioFeatures } from './audio/features';
 import { effectiveParams } from './dsp/mod';
@@ -30,6 +31,9 @@ import { migrateLegacyPoints } from './state/migrate';
 import { renderPointList } from './ui/pointList';
 import type { PointRow } from './ui/pointList';
 import { keepScreenAwake } from './ui/wakelock';
+import {
+  canvasUv, strokePoints, TOUCH_AMOUNT, TOUCH_MAX_STAMPS, TOUCH_RADIUS, TOUCH_SPACING,
+} from './ui/touch';
 import { askConfirm, askText } from './ui/askDialog';
 import type { UserPreset } from './state/userPresets';
 import { PRESETS, DEFAULT_PRESET_INDEX } from './presets';
@@ -205,6 +209,7 @@ function boot(): void {
   }
 
   const audio = new AudioEngine();
+  const iosUnlock = new IosAudioUnlock();
   let features: AudioFeatures = { ...SILENT_FEATURES };
   const onsets = new OnsetDetector();
   const ripples = new RippleSet();
@@ -550,6 +555,13 @@ function boot(): void {
     document.addEventListener(ev, stayAwake, { once: true });
   }
 
+  // iOS suspends the audio context when the tab goes away (a call, an app
+  // switch, the screen locking) and does not always bring it back on its
+  // own: the button still says it is playing and nothing is heard.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && audio.running) void audio.resume();
+  });
+
   likeBtn.addEventListener('click', like);
   dislikeBtn.addEventListener('click', dislike);
   surpriseBtn.addEventListener('click', surprise);
@@ -676,6 +688,11 @@ function boot(): void {
   // --- audio -------------------------------------------------------------
   async function startAudio(): Promise<void> {
     if (audio.running) return;
+    // iOS: the silent <audio> has to start SYNCHRONOUSLY inside the gesture,
+    // before the first await, or the Ring/Silent switch mutes everything.
+    // See audio/iosUnlock.ts — this must stay the first statement here.
+    // (body[data-ios-unlock] is how scripts/smoke.mjs sees it happened.)
+    void iosUnlock.play().then((ok) => { document.body.dataset.iosUnlock = ok ? '1' : 'refused'; });
     audioBtn.disabled = true;
     try {
       await audio.start({ masterGain, fx: state.audio.fx, formulas: state.audio.formulas, mod: state.mod });
@@ -699,6 +716,8 @@ function boot(): void {
 
   async function stopAudio(): Promise<void> {
     if (!audio.running) return;
+    iosUnlock.stop();
+    document.body.dataset.iosUnlock = '0';
     clockOffset = performance.now() / 1000 - audio.time; // keep the LFO clock continuous
     stopScout();
     await audio.stop();
@@ -744,6 +763,45 @@ function boot(): void {
     return out;
   }
 
+  // --- touch / click on the canvas (PLAN.md decision 14) -----------------
+  // A finger seeds the picture exactly the way a bell strike does: the same
+  // inject() disc and the same ripple as an onset hit. Sampled once per
+  // frame, not per pointermove — a move event can fire at 120 Hz and each
+  // stamp is a full-grid pass.
+  let painting = false;
+  let pointerUv: [number, number] = [0.5, 0.5];
+  let stampedAt: [number, number] | null = null;
+  let touchSeeds = 0;
+
+  function paintStroke(): void {
+    if (!painting) return;
+    const points = stampedAt
+      ? strokePoints(stampedAt, pointerUv, TOUCH_SPACING, sim.aspect, TOUCH_MAX_STAMPS)
+      : [pointerUv];
+    for (const p of points) sim.inject(p, TOUCH_RADIUS, TOUCH_AMOUNT);
+    stampedAt = [pointerUv[0], pointerUv[1]];
+    touchSeeds += points.length;
+    document.body.dataset.touchSeeds = String(touchSeeds);
+  }
+
+  canvas.addEventListener('pointerdown', (e) => {
+    painting = true;
+    stampedAt = null; // a press stamps exactly where it landed, with no trail
+    pointerUv = canvasUv(canvas.getBoundingClientRect(), e.clientX, e.clientY);
+    ripples.add(pointerUv[0], pointerUv[1], TOUCH_AMOUNT, performance.now() / 1000);
+    canvas.setPointerCapture(e.pointerId);
+    e.preventDefault(); // no text selection, no scroll-from-canvas on a phone
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (painting) pointerUv = canvasUv(canvas.getBoundingClientRect(), e.clientX, e.clientY);
+  });
+  const endStroke = (): void => {
+    painting = false;
+    stampedAt = null;
+  };
+  canvas.addEventListener('pointerup', endStroke);
+  canvas.addEventListener('pointercancel', endStroke);
+
   // Onset hit → fresh growth at a random spot + a ripple from it
   // (onsetToSeed, PLAN.md decision 8).
   function seedOnHit(now: number): void {
@@ -781,6 +839,7 @@ function boot(): void {
       if (onsets.update(features.onset, now)) seedOnHit(now);
     }
 
+    paintStroke();
     const t = lfoTime();
     const eff = applyCoupling(effectiveCards(t), features, state.coupling);
     sim.reaction = reactionParamsFromCard(eff.reaction);

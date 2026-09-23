@@ -58,6 +58,10 @@ you don't, and the search follows.
   status line says so when it isn't there. The current point survives a
   reload on its own, and old long `#s=…` links still open.
 
+**Touch or drag the picture** and it answers the way it answers the music:
+new growth under your finger and a ripple spreading out from it — the same
+reaction an onset in the sound produces.
+
 Keys: ← 👎 · → 👍 · ↑ 🎲 · Backspace ↩ · Space ▶ sound.
 
 How big it renders is **measured, not guessed**: the first frames of the

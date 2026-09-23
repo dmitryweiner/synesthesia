@@ -20,6 +20,8 @@ npm run smoke     # Playwright: boot, sound, 👍/👎/🎲/undo, every preset,
                   # The ONLY check of WebGL2/Web Audio (vitest can't load them)
 npm run snap -- --out shots/x.png [--preset N] [--sound] [--like N] [--dislike N]
                   [--details] [--help] [--res N] [--wait ms]
+                  [--reseed] [--stroke x0,y0,x1,y1]  # drag on a clean field:
+                  #   the only way to see what a touch actually painted
 npm run analyze   # fractality of the real sound (see "Sound analysis" below);
                   # --onsets: onset hits per preset at 60/30/15 fps (the
                   #   picture seeds growth on every hit — tune the detector here);
@@ -187,6 +189,11 @@ src/audio/features.ts  analyser → loudness, swell (vs ~4 s average), brightnes
                        low/mid/high bands, onset envelope (adaptive: rise of 20
                        log bands vs mean + 3·dev). Time-based smoothing (dt).
                        OnsetDetector: envelope → discrete hits
+src/audio/iosUnlock.ts the iOS Ring/Silent fix (PLAN.md bugs, 2026-09-23):
+                       a silent looping <audio>, started SYNCHRONOUSLY in the
+                       Sound click before any await — move that call after an
+                       await and iOS goes quiet again. Ported from
+                       ../formula-synth
 src/audio/analyserSim.ts  pure AnalyserNode emulation (Blackman, smoothing, dB →
                        byte) — runs the live feature pipeline on offline audio
 src/audio/filters.ts, modrouting.ts  pure pieces of the engine (tested)
@@ -252,6 +259,10 @@ src/presets.ts         12 presets = formula-synth sound × chromaflux material,
 src/ui/details.ts      read-only "what is this point" panel (+ fractality);
                        renders into #detailsBody — the panel's own ✕ lives
                        outside it, so a re-render can't wipe it
+src/ui/touch.ts        pure: pointer → canvas UV (Y flips) and the stamps to
+                       fill a drag between two frames. A touch runs the same
+                       inject()+ripple an onset does (PLAN.md #14) — chromaflux's
+                       Brush card itself is still not ported (PLAN.md #2)
 src/ui/wakelock.ts     screen wake lock: taken on the first gesture, re-taken
                        when the tab is visible again (phones dim otherwise)
 src/main.ts            wiring only: explorer → 2 s eased genome morph →

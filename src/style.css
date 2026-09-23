@@ -130,6 +130,12 @@ body {
   width: 100%;
   height: 100%;
   display: block;
+  /* The canvas is a drawing surface: a drag paints on it (src/ui/touch.ts),
+     so the browser must not read one as a scroll, a zoom or a selection. */
+  touch-action: none;
+  cursor: crosshair;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 #webglError {

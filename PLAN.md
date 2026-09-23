@@ -292,6 +292,54 @@ can refuse a save were both removed instead of guessing:
     res 1024 / 1920×1080, before → after: **react 87.9 → 36.2 ms a substep,
     the noise fields 120 → 42 ms, display 238 → 205 ms.**
 
+## Decisions after user testing (agreed with the user, 2026-09-23)
+
+14. **The picture answers a finger.** Users asked for a touch/click reaction
+    like ../chromaflux's. This partly revises decision 2 ("Brush is not
+    ported — no pointer tool in this app"): the *tool* still isn't ported,
+    because there is no parameter UI here to hold its five modes and two
+    sliders. What is ported is the reaction.
+    - A press drops fresh "ink" into the reaction and sends a ripple out from
+      it — the **same `inject()` disc and the same ripple an onset hit
+      already produces** (decision 8). A finger and a bell strike are the
+      same kind of event, so they get the same two passes: no new gene, no
+      new shader, no new card.
+    - Dragging paints continuously. The stroke is sampled **once per frame**,
+      not per `pointermove` (which fires at up to 120 Hz and each stamp is a
+      full-grid pass), and the gap between two frames is filled in with
+      evenly spaced stamps — at 10 fps on a machine with no GPU a finger
+      crosses a third of the screen between frames, and stamping only the
+      current position leaves a dotted trail instead of a stroke
+      (`strokePoints`, `src/ui/touch.ts`).
+    - *The strength is fixed, not the point's `onsetToSeed` gene.* People
+      asked for a reaction; a point that happens to have evolved a weak onset
+      coupling must not read as a broken app.
+    - `touch-action: none` on the canvas, and the pointer is captured, so a
+      drag is a stroke rather than a scroll or a text selection, and it keeps
+      painting at the edge if the finger leaves the canvas.
+
+## Bugs found after user testing (2026-09-23)
+
+- **iOS: sometimes no sound at all — fixed.** The hardware Ring/Silent
+  switch mutes Web Audio, because the audio session sits on the "ringer"
+  category by default. ../formula-synth already had the fix and this app had
+  never got it: playing a short **silent `<audio>` element inside the user
+  gesture** moves the session to the media category
+  (`src/audio/iosUnlock.ts`, ported; the WAV bytes are written inline rather
+  than pulling in an encoder). Two things make or break it, and both are
+  guarded:
+  - it must start **synchronously in the click, before the first `await`**,
+    or iOS does not count it as an activation — so it is the first statement
+    of `startAudio()`, and the smoke fails if `body[data-ios-unlock]` is not
+    `1` once sound is running;
+  - it must **keep looping** while the engine plays, or iOS puts the session
+    back on the ringer channel.
+- **iOS: silence after a call or an app switch — fixed.** The context is
+  suspended when the tab goes away and does not always come back on its own:
+  the button still said it was playing and nothing was heard.
+  `visibilitychange` now resumes it, the same way ../formula-synth does.
+  (`AudioEngine.resume()` already existed here — nothing had ever called it.)
+
 ## Architecture
 
 ```

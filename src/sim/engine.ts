@@ -114,7 +114,7 @@ export class SimEngine {
   }
 
   /** Grid width / height: noise and seed spots are laid out in aspect-corrected UV. */
-  private get aspect(): number {
+  get aspect(): number {
     return this.state.width / this.state.height;
   }
 

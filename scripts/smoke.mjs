@@ -154,6 +154,14 @@ ctxLabel = 'audio';
 await page.locator('#audioBtn').click();
 await page.waitForTimeout(1500);
 check(((await page.locator('#audioBtn').textContent()) ?? '').includes('⏹'), 'audio did not start');
+// iOS Ring/Silent switch: a silent <audio> must be playing alongside Web
+// Audio, started synchronously in the click (src/audio/iosUnlock.ts). Not
+// testable on real iOS from here, so this guards against it being dropped.
+{
+  const unlocked = await page.waitForFunction(() => document.body.dataset.iosUnlock === '1', null, { timeout: 10000 })
+    .then(() => true).catch(() => false);
+  check(unlocked, `the iOS silent-audio unlock did not start (data-ios-unlock=${await page.evaluate(() => document.body.dataset.iosUnlock)})`);
+}
 
 // --- scout: with sound on, 3 👍 + 3 👎 candidates get rendered offline and
 // scored; the next 👍 must commit the best of them ---
@@ -451,6 +459,31 @@ ctxLabel = 'share-offline';
   await off.close();
 }
 
+// --- a touch on the canvas seeds the picture, a drag paints a stroke ---
+ctxLabel = 'touch';
+{
+  const box = await page.locator('#view').boundingBox();
+  const seeds = () => page.evaluate(() => Number(document.body.dataset.touchSeeds ?? 0));
+  check((await seeds()) === 0, 'nothing should have been painted before the first touch');
+  await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.4);
+  await page.mouse.down();
+  await page.waitForTimeout(400);
+  const afterPress = await seeds();
+  check(afterPress > 0, 'a press on the canvas did not seed the picture');
+  // A drag must lay a trail, not a single dot at the far end.
+  await page.mouse.move(box.x + box.width * 0.7, box.y + box.height * 0.6, { steps: 8 });
+  await page.waitForTimeout(600);
+  await page.mouse.up();
+  const afterDrag = await seeds();
+  check(afterDrag > afterPress + 1, `a drag laid ${afterDrag - afterPress} stamp(s), expected a trail`);
+  // Releasing stops it: no stamps once the pointer is up.
+  await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5, { steps: 4 });
+  await page.waitForTimeout(400);
+  check((await seeds()) === afterDrag, 'the canvas kept painting after the pointer was released');
+  // The picture must still be a picture (the sim survives the injections).
+  check(await page.locator('#webglError').isHidden(), 'WebGL error after painting');
+}
+
 // --- the boot probe picks a rung, and the app renders at the one it picked ---
 // (every other page here passes ?res=, which switches the probe off; this is
 // the only place the auto-tuning path runs at all)
@@ -481,6 +514,7 @@ ctxLabel = 'stop';
 await page.locator('#audioBtn').click();
 await page.waitForTimeout(600);
 check(((await page.locator('#audioBtn').textContent()) ?? '').includes('▶'), 'audio did not stop');
+check(await page.evaluate(() => document.body.dataset.iosUnlock === '0'), 'the silent unlock element kept playing after Stop');
 await page.locator('#likeBtn').click(); // feedback still works without sound
 await page.waitForTimeout(300);
 
