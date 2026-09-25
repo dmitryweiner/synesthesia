@@ -48,11 +48,17 @@ export async function ensureServer(preview) {
     const cmd = preview
       ? ['vite', 'preview', '--port', String(PORT), '--strictPort']
       : ['vite', '--port', String(PORT), '--strictPort'];
-    proc = spawn('npx', cmd, { stdio: 'ignore' });
+    // Own process group: killing npx alone left vite running, and every
+    // SYN_PORT run leaked a server (four in one session).
+    proc = spawn('npx', cmd, { stdio: 'ignore', detached: true });
     for (let i = 0; i < 30 && !(await up()); i++) await new Promise((r) => setTimeout(r, 1000));
     if (!(await up())) { console.error(`server did not start on :${PORT}`); process.exit(1); }
   }
-  return { BASE, stop: () => proc?.kill() };
+  const stop = () => {
+    if (!proc) return;
+    try { process.kill(-proc.pid); } catch { proc.kill(); }
+  };
+  return { BASE, stop };
 }
 
 // Autoplay so an AudioContext starts without a real gesture; SwiftShader

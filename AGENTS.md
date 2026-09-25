@@ -128,7 +128,8 @@ Corollaries:
   page). Run them against a snapshot on another port instead:
   `rsync -a --exclude node_modules --exclude docs --exclude shots --exclude .git ./ $SNAP/`,
   symlink `node_modules`, then `SYN_PORT=5180 node scripts/analyze.mjs …`
-  from the snapshot. Snapshot servers outlive the session: one held :5181
+  from the snapshot. Snapshot servers used to outlive the run (`stop()`
+  killed npx, not vite; now the whole process group goes): one held :5181
   for days, and a later run on that port measured the OLD tree.
   `ensureServer()` now refuses a server that isn't serving this checkout
   (Vite answers `/@fs/<our root>/package.json` with 403 from anyone else's)
