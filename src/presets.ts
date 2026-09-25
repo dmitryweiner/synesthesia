@@ -471,6 +471,64 @@ export const PRESETS: readonly Preset[] = [
     routes: [{ src: 0, target: 'palette', param: 'lightAngle', depth: 0.4 }],
     coupling: { loudToCurl: 0.9, loudToFlow: 0.7, loudToGloss: 0.4, loudToPulse: 0.8, onsetToFlash: 0.4, onsetToSeed: 0.5, spectrumToTint: 0.7 },
   }),
+
+  preset('Overtone steppe', {
+    // Throat singing, built the way the FX-mod family people liked is built
+    // (one dense harmonic grid, a band that never breaks, four LFOs at
+    // unrelated rates) but with a move none of them makes: a peaking
+    // resonance so narrow (Q 30, +20 dB) that it lifts ONE harmonic of the
+    // 55 Hz drone at a time. Swept slowly across harmonics ~9…36, it sings a
+    // whistled melody made of the drone's own overtone series — every note
+    // is on the grid, nothing is ever cut away. Additive `move` is slow
+    // (0.05 Hz) so its ripple doesn't swallow the chosen harmonic; the
+    // phaser is what lifts fractality from ~0.46 to ~0.9 (analyze.mjs
+    // --repeat); a quiet tanh voice an octave up is the growl under it.
+    // Measured against the liked family (--character --ref 0,3,5,6,8):
+    // distance 0.94, inside the family's own spread (0.75–1.25).
+    // Image: stripes = harmonics, blown sideways by a steady steppe wind
+    // (Drift X) that erodes them into a pale haze. The LFO that sweeps the
+    // whistle also swings the light across the ridges, and the triangle
+    // that breathes the whistle's gain nudges Feed.
+    masterGain: 0.72,
+    fx: {
+      ...LIMITED,
+      filterOn: true, filterType: 'peaking', filterFreq: 1000, filterQ: 30, filterGain: 20,
+      chorusOn: true, chorusMode: 'chorus', chorusRate: 0.05, chorusDepth: 5, chorusMix: 0.25, chorusFb: 0.2,
+      phaserOn: true, phaserRate: 0.15, phaserDepth: 0.6, phaserStages: 6, phaserFb: 0.35, phaserMix: 0.35,
+      delayOn: true, delayTime: 0.93, delayFb: 0.42, delayMix: 0.28,
+      reverbOn: true, reverbDecay: 6, reverbMix: 0.42,
+    },
+    formulas: {
+      additive: { gain: 0.55, fund: 55, N: 36, move: 0.05 },
+      beats: { gain: 0.3, fbeat: 55, df: 0.45 },
+      dist: { gain: 0.08, fd: 110, alpha: 2.5 },
+    },
+    reaction: { feed: 0.032, kill: 0.058, speed: 18 },
+    fieldVariation: { feedVarAmount: 0.014, feedVarScale: 3, feedVarWarp: 1.4, killVarAmount: 0.007, killVarScale: 4, killVarWarp: 1.2 },
+    flow: { curlStrength: 0.008, curlScale: 2.5, driftX: 0.005, advectAmount: 0.25, evolveRate: 0.006 },
+    palette: { paletteId: 0, bands: 2, contrast: 1.2, relief: 1.4, gloss: 0.5 },
+    lfos: [
+      { shape: 'sine', rate: 0.019, phase: 0 },
+      { shape: 'triangle', rate: 0.037, phase: 0.5 },
+      { shape: 'sine', rate: 0.053, phase: 0.25 },
+      { shape: 'random', rate: 0.029, phase: 0 },
+    ],
+    routes: [
+      // The whistle: ±1 octave around 1 kHz (harmonics ~9…36), ~53 s a lap.
+      { src: 0, target: 'fx', param: 'filterFreq', depth: 0.15, exp: true },
+      { src: 1, target: 'fx', param: 'filterGain', depth: 0.12 },
+      { src: 2, target: 'fx', param: 'chorusDepth', depth: 0.3 },
+      { src: 2, target: 'fx', param: 'reverbMix', depth: 0.25 },
+      // S&H every ~35 s: the drone's inner motion, the growl, the echo tail.
+      { src: 3, target: 'additive', param: 'move', depth: 0.08 },
+      { src: 3, target: 'dist', param: 'alpha', depth: 0.3 },
+      { src: 3, target: 'fx', param: 'delayFb', depth: 0.2 },
+      { src: 0, target: 'palette', param: 'lightAngle', depth: 0.5 },
+      { src: 1, target: 'reaction', param: 'feed', depth: 0.1 },
+    ],
+    coupling: { brightToShift: 0.6, loudToGloss: 0.5, onsetToLight: 0.3, loudToPulse: 0.9, onsetToFlash: 0.3, onsetToSeed: 0.4, spectrumToTint: 0.8 },
+  }),
 ];
 
 export const DEFAULT_PRESET_INDEX = 0;
+

@@ -41,6 +41,15 @@
 //       # for --at seconds, then switches to the next; reports clicks
 //       # (src/analysis/clicks.ts) around every switch and elsewhere
 //
+//   node scripts/analyze.mjs --preset 12 --repeat 4
+//       # render each point 4 times, print mean ± sd of the score: the reverb
+//       # impulse is fresh noise per build, and a point sitting on the steep
+//       # side of a preference curve moves by ±0.1 between renders
+//   node scripts/analyze.mjs --character --ref 0,3,5,6,8 --preset 0,3,5,6,8,12
+//       # + character columns (src/analysis/character.ts: dropout, swing,
+//       # low-end share, harmonicity, roughness, motion at 1 s / 10 s) and
+//       # each point's distance to the --ref group of presets
+//
 // Columns: score (0..1), envβ / cenβ (1/f^β of loudness / timbre contours,
 // pink = 1), HFD (Higuchi dimension of the loudness contour), box
 // (box-counting dimension of the spectrogram's loudest cells), dB.
@@ -48,7 +57,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseFlags, ensureServer, launchBrowser, captureErrors, openApp, withParam } from './lib.mjs';
 
-const { flags } = parseFlags(process.argv.slice(2), ['preset', 'hash', 'secs', 'sr', 'mutants', 'random', 'wav', 'json', 'seed', 'configs', 'switch', 'at', 'fps', 'grid', 'scale', 'size', 'warm', 'reps']);
+const { flags } = parseFlags(process.argv.slice(2), ['preset', 'hash', 'secs', 'sr', 'mutants', 'random', 'wav', 'json', 'seed', 'configs', 'switch', 'at', 'fps', 'grid', 'scale', 'size', 'warm', 'reps', 'repeat', 'ref']);
 const SECS = Number(flags.get('secs') ?? 30);
 const SR = Number(flags.get('sr') ?? 22050);
 const MUTANTS = Number(flags.get('mutants') ?? 0);
@@ -229,7 +238,10 @@ if (flags.has('render')) {
 
 const page = await browser.newPage();
 captureErrors(page, errors);
-await openApp(page, `${BASE}/?res=64`);
+// The page is the app itself, and its rAF loop keeps painting while audio
+// renders offline: at the default canvas the GPU process took ~2.5 cores
+// for a picture nobody looks at. A 64 px canvas makes that negligible.
+await openApp(page, `${BASE}/?res=64&scale=64`);
 
 // Build the candidate list in the page (the genome code is TypeScript).
 const candidates = await page.evaluate(async ({ presetArg, hash, mutants, random, seed }) => {
@@ -384,37 +396,61 @@ if (flags.has('configs')) {
   process.exit(errors.length ? 2 : 0);
 }
 
-console.log(`${pad('point', 34)} score  envβ   cenβ   HFD    box    dB    (${SECS}s @ ${SR} Hz)`);
+// --repeat N: the same point renders differently every time (the reverb
+// impulse is fresh noise per build), and the score moves with it — 0.28
+// vs 0.52 for one point. Render N times and print mean ± sd before
+// comparing points that differ by less than that.
+const REPEAT = Math.max(1, Number(flags.get('repeat') ?? 1));
+const CHARACTER_KEYS = ['dropout', 'swing', 'lowShare', 'harmonicity', 'roughness', 'motion1s', 'motion10s'];
+const METRIC_KEYS = ['score', 'envBeta', 'centroidBeta', 'envHiguchi', 'boxDim', 'loudness', ...CHARACTER_KEYS];
+const CHARACTER = flags.has('character') || flags.has('ref');
+const meanOf = (xs) => { const f = xs.filter(Number.isFinite); return f.length ? f.reduce((a, b) => a + b, 0) / f.length : NaN; };
+const sdOf = (xs) => { const m = meanOf(xs); const f = xs.filter(Number.isFinite); return f.length ? Math.sqrt(f.reduce((a, b) => a + (b - m) ** 2, 0) / f.length) : NaN; };
+const charHead = CHARACTER ? 'drop  swing low   harm  rough mot1  mot10 ' : '';
+console.log(`${pad('point', 34)} ${REPEAT > 1 ? 'score±sd    ' : 'score  '}envβ   cenβ   HFD    box    dB    ${charHead}(${SECS}s @ ${SR} Hz${REPEAT > 1 ? `, mean of ${REPEAT} renders` : ''})`);
 
 const results = [];
 for (const c of candidates) {
   const t0 = Date.now();
-  const r = await page.evaluate(async ({ state, secs, sr, wantWav }) => {
-    const { AudioEngine } = await import('/src/audio/engine.ts');
-    const { analyzeSound } = await import('/src/analysis/fractal.ts');
-    const samples = await AudioEngine.renderOffline(
-      { masterGain: state.audio.masterGain, fx: state.audio.fx, formulas: state.audio.formulas, mod: state.mod },
-      secs, sr,
-    );
-    const m = analyzeSound(samples, sr);
-    let wav = null;
-    if (wantWav) {
-      const bytes = new Uint8Array(samples.length * 2);
-      const dv = new DataView(bytes.buffer);
-      for (let i = 0; i < samples.length; i++) dv.setInt16(i * 2, Math.max(-1, Math.min(1, samples[i])) * 32767, true);
-      let bin = '';
-      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-      wav = btoa(bin);
-    }
-    return { m, wav };
-  }, { state: c.state, secs: SECS, sr: SR, wantWav: flags.has('wav') && c.group !== 'mutant' });
-  const m = r.m;
+  const runs = [];
+  let wavB64 = null;
+  for (let rep = 0; rep < REPEAT; rep++) {
+    const r = await page.evaluate(async ({ state, secs, sr, wantWav }) => {
+      const { AudioEngine } = await import('/src/audio/engine.ts');
+      const { analyzeSound } = await import('/src/analysis/fractal.ts');
+      const { analyzeCharacter } = await import('/src/analysis/character.ts');
+      const samples = await AudioEngine.renderOffline(
+        { masterGain: state.audio.masterGain, fx: state.audio.fx, formulas: state.audio.formulas, mod: state.mod },
+        secs, sr,
+      );
+      const m = { ...analyzeSound(samples, sr), ...analyzeCharacter(samples, sr) };
+      let wav = null;
+      if (wantWav) {
+        const bytes = new Uint8Array(samples.length * 2);
+        const dv = new DataView(bytes.buffer);
+        for (let i = 0; i < samples.length; i++) dv.setInt16(i * 2, Math.max(-1, Math.min(1, samples[i])) * 32767, true);
+        let bin = '';
+        for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+        wav = btoa(bin);
+      }
+      return { m, wav };
+    }, { state: c.state, secs: SECS, sr: SR, wantWav: rep === 0 && flags.has('wav') && c.group !== 'mutant' });
+    runs.push(r.m);
+    if (r.wav) wavB64 = r.wav;
+  }
+  const m = { ...runs[0] };
+  for (const k of METRIC_KEYS) m[k] = meanOf(runs.map((x) => x[k]));
+  if (REPEAT > 1) m.scoreSd = sdOf(runs.map((x) => x.score));
+  const scoreCol = REPEAT > 1 ? `${fmt(m.score)}±${fmt(m.scoreSd)}  ` : fmt(m.score);
   results.push({ group: c.group, label: c.label, ...m });
-  console.log(`${pad(c.label, 34)} ${fmt(m.score)}   ${fmt(m.envBeta)}   ${fmt(m.centroidBeta)}   ${fmt(m.envHiguchi)}   ${fmt(m.boxDim)}   ${fmt(m.loudness, 0)}${m.silent ? '  SILENT' : ''}   ${((Date.now() - t0) / 1000).toFixed(1)}s`);
-  if (r.wav) {
+  const charCols = CHARACTER
+    ? `  ${[m.dropout, m.swing].map((v) => pad(fmt(v, 1), 5)).join(' ')} ${[m.lowShare, m.harmonicity, m.roughness].map((v) => pad(fmt(v), 5)).join(' ')} ${[m.motion1s, m.motion10s].map((v) => pad(fmt(v, 1), 5)).join(' ')}`
+    : '';
+  console.log(`${pad(c.label, 34)} ${scoreCol}   ${fmt(m.envBeta)}   ${fmt(m.centroidBeta)}   ${fmt(m.envHiguchi)}   ${fmt(m.boxDim)}   ${fmt(m.loudness, 0)}${charCols}${m.silent ? '  SILENT' : ''}   ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+  if (wavB64) {
     const dir = flags.get('wav');
     mkdirSync(dir, { recursive: true });
-    const pcm = Buffer.from(r.wav, 'base64');
+    const pcm = Buffer.from(wavB64, 'base64');
     const hdr = Buffer.alloc(44);
     hdr.write('RIFF', 0); hdr.writeUInt32LE(36 + pcm.length, 4); hdr.write('WAVE', 8);
     hdr.write('fmt ', 12); hdr.writeUInt32LE(16, 16); hdr.writeUInt16LE(1, 20); hdr.writeUInt16LE(1, 22);
@@ -422,6 +458,32 @@ for (const c of candidates) {
     hdr.write('data', 36); hdr.writeUInt32LE(pcm.length, 40);
     const name = c.label.replace(/[^\w]+/g, '_').replace(/^_|_$/g, '');
     writeFileSync(join(dir, `${name}.wav`), Buffer.concat([hdr, pcm]));
+  }
+}
+
+// --ref 0,3,5,6,8: how far each point sits from a reference group of
+// presets (e.g. the ones people liked most) — per metric z-scores against
+// the group's mean/sd, RMS over the metrics. The group members must be in
+// this run (list them in --preset too). A new preset near ~1 is inside the
+// family's spread; the list of metrics beyond 2 sd says WHERE it differs.
+if (flags.has('ref')) {
+  const refIdx = flags.get('ref').split(',').map(Number);
+  const refs = results.filter((r) => refIdx.some((i) => r.label.startsWith(`${i}: `)));
+  const keys = ['envBeta', 'centroidBeta', 'boxDim', ...CHARACTER_KEYS];
+  const stat = Object.fromEntries(keys.map((k) => {
+    const xs = refs.map((r) => r[k]);
+    // a floor on sd: a family that happens to agree on a metric must not
+    // turn a tiny difference into a huge z
+    const floor = { envBeta: 0.15, centroidBeta: 0.15, boxDim: 0.05, dropout: 1, swing: 2, lowShare: 0.05, harmonicity: 0.05, roughness: 0.02, motion1s: 0.3, motion10s: 0.5 }[k];
+    return [k, { mean: meanOf(xs), sd: Math.max(floor, sdOf(xs)) }];
+  }));
+  console.log(`\ndistance to the reference group (${refs.map((r) => r.label).join(', ')}):`);
+  console.log(`  ${keys.map((k) => `${k} ${fmt(stat[k].mean)}±${fmt(stat[k].sd)}`).join('  ')}`);
+  for (const r of results) {
+    const zs = keys.map((k) => [k, (r[k] - stat[k].mean) / stat[k].sd]).filter(([, z]) => Number.isFinite(z));
+    const d = Math.sqrt(zs.reduce((a, [, z]) => a + z * z, 0) / Math.max(1, zs.length));
+    const far = zs.filter(([, z]) => Math.abs(z) > 2).map(([k, z]) => `${k}${z > 0 ? '+' : ''}${z.toFixed(1)}`);
+    console.log(`  ${pad(r.label, 32)} ${fmt(d)}  ${far.join(' ')}`);
   }
 }
 

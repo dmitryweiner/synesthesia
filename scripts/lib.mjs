@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium } from 'playwright';
 
 const CLOUD = fileURLToPath(new URL('../cloud/', import.meta.url));
+const ROOT = fileURLToPath(new URL('../', import.meta.url));
 
 export function parseFlags(argv, valueFlags, repeatable = []) {
   const flags = new Map();
@@ -31,6 +32,18 @@ export async function ensureServer(preview) {
   const BASE = `http://localhost:${PORT}`;
   const up = async () => { try { return (await fetch(BASE)).ok; } catch { return false; } };
   let proc = null;
+  // A server already on the port may belong to ANOTHER checkout (a stale
+  // snapshot from an earlier session held :5181 for days), and the page
+  // would then measure that tree's code without a word. Vite serves
+  // /@fs/<path> only inside its own workspace, so our package.json answers
+  // 200 from our server and 403 from anyone else's.
+  if (!preview && (await up())) {
+    const mine = await fetch(`${BASE}/@fs${ROOT}package.json`).then((r) => r.ok, () => false);
+    if (!mine) {
+      console.error(`:${PORT} is served from another directory, not ${ROOT} — stop that server or pick a free SYN_PORT`);
+      process.exit(1);
+    }
+  }
   if (!(await up())) {
     const cmd = preview
       ? ['vite', 'preview', '--port', String(PORT), '--strictPort']

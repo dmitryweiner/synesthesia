@@ -8,7 +8,9 @@ generators + FX, ported from [../formula-synth](../formula-synth/)) and an
 image (Gray–Scott reaction-diffusion, ported from
 [../chromaflux](../chromaflux/)) at the same time; the user steers the
 search with 👍/👎. Decisions agreed with the user live in **PLAN.md** — read
-it before changing behavior. README.md is the human-facing spec. UI, docs
+it before changing behavior. Proposals that are *not* agreed yet (sound
+mechanics, missing measurements, with the numbers behind them) live in
+**PLAN-IMPROVEMENTS.md**. README.md is the human-facing spec. UI, docs
 and code comments are in English.
 
 ## Commands
@@ -34,6 +36,10 @@ npm run analyze   # fractality of the real sound (see "Sound analysis" below);
                   # --render --passes: ms per PASS — a 1-px readPixels is a
                   #   real barrier where gl.finish() is not, and timing step()
                   #   at speed 1 vs 11 splits one react substep from the rest
+                  # --repeat N: mean ± sd over N renders of each point;
+                  # --character [--ref 0,3,5,6,8]: what KIND of sound
+                  #   (dropout, swing, low end, harmonicity, roughness,
+                  #   motion at 1 s / 10 s) and the distance to a group
 npm run build     # tsc + vite build into ./docs (GitHub Pages) — commit docs/
 npm run check:cloud   # cloud/ Worker: tsc + Miniflare tests (npm install in cloud/ once)
 npm run deploy:cloud  # D1 migrations --remote + wrangler deploy (wrangler is authorized)
@@ -63,6 +69,8 @@ every guess cost a round trip:
 | are the built-in presets actually "fractal"? | `analyze.mjs --random 12` | presets 0.79±0.14 vs random 0.55±0.31 |
 | why 0.57 fps on a 1080p board with no GPU? | `analyze.mjs --render --passes` | react×16 = 1406 ms of 1764 (80%), *not* the noise fields (120 ms, 7%) — a C cost model had said the opposite |
 | how much does the canvas cost on its own? | `--render --grid 64` (grid made negligible) | 262 ms at 1920×1031, 128 at 1280×671, 46 at 640×271 — it does not shrink with `?res=` |
+| is a 0.1 score difference between two points real? | `analyze.mjs --repeat 4` | the reverb impulse is fresh noise per render: liked presets move ±0.01–0.03, but a point with envβ≈2 (the steep side of the preference) read 0.28 and 0.52 on two renders. *Overtone steppe*: 0.82–0.96 over 14 renders with seeded rooms — yet two whole runs read 0.70±0.00 (not load, not the server, not a lost reverb; cause open, PLAN-IMPROVEMENTS.md) |
+| what do the presets people liked most have in common? | `analyze.mjs --character --ref 0,3,5,6,8` | a band that never breaks (dropout 4–6 dB vs 8–12 for drips/bells/wind), low end 0.65–0.96 of the energy (vs 0.0–0.2), one harmonic grid, slow change |
 | did the render changes actually help? | `--render` / `--render --passes`, base vs new snapshots, interleaved | same configuration 2.0×; default point 0.57 → 10.8 fps |
 
 Corollaries:
@@ -112,11 +120,19 @@ Corollaries:
   measures ~8× slower than every later one at the identical configuration
   (0.29 fps, then 2.73, 2.36, 2.53). No warm-up *inside* the page covers it;
   `--render` opens and closes a throwaway page first.
+- **`analyze.mjs`'s page is the live app**, and its rAF loop keeps painting
+  while audio renders offline: at the default canvas the GPU process took
+  ~2.5 cores and a 60 s render went from ~20 s to 60–190 s. It opens with
+  `?res=64&scale=64` — keep both if you change that URL.
 - **Long analysis runs die when you edit `src/`** (Vite full-reloads the
   page). Run them against a snapshot on another port instead:
   `rsync -a --exclude node_modules --exclude docs --exclude shots --exclude .git ./ $SNAP/`,
   symlink `node_modules`, then `SYN_PORT=5180 node scripts/analyze.mjs …`
-  from the snapshot.
+  from the snapshot. Snapshot servers outlive the session: one held :5181
+  for days, and a later run on that port measured the OLD tree.
+  `ensureServer()` now refuses a server that isn't serving this checkout
+  (Vite answers `/@fs/<our root>/package.json` with 403 from anyone else's)
+  — pick another port, don't disable the check.
 
 ## Headless browser gotchas (this machine: aarch64, SwiftShader)
 
@@ -248,13 +264,15 @@ src/genome/scout.ts    background best-of-k (PLAN.md #7): renders parent + k
                        take() returns null for stale versions
 src/analysis/          fft.ts (radix-2), fractal.ts (spectralSlope, higuchiFD,
                        boxCountDimension, analyzeSound, fractalScore),
+                       character.ts (dropout, swing, low-end share,
+                       harmonicity, Plomp–Levelt roughness, motion at 1/10 s),
                        clicks.ts (median-relative HF click detector)
 src/coupling.ts        pure: features × card-coupling genes → card param offsets
                        (shift/lightAngle wrap, the rest clamp); COUPLING_LABELS
 src/visualFx.ts        pure: explicit couplings (PLAN.md #8) → DisplayFx
                        {exposure, flash, tint[3]}; RippleSet (≤4, 1.6 s).
                        main.ts: OnsetDetector hit → sim.inject() + ripple
-src/presets.ts         12 presets = formula-synth sound × chromaflux material,
+src/presets.ts         13 presets = formula-synth sound × chromaflux material,
                        with cross-domain LFO routes and coupling
 src/ui/details.ts      read-only "what is this point" panel (+ fractality);
                        renders into #detailsBody — the panel's own ✕ lives
@@ -277,7 +295,9 @@ scripts/smoke.mjs      invariants only, never pixels; --mobile, --res, --screens
 scripts/snap.mjs       one debug screenshot
 scripts/analyze.mjs    offline render in the page (imports /src/*.ts from the dev
                        server) → metrics table; --mutants, --random, --configs
-                       (Spearman of cheap windows vs the first), --wav, --json
+                       (Spearman of cheap windows vs the first), --wav, --json,
+                       --repeat (mean ± sd), --character, --ref (distance to
+                       a group of presets)
 ```
 
 ## Sound analysis — what the numbers mean
@@ -287,6 +307,19 @@ scripts/analyze.mjs    offline render in the page (imports /src/*.ts from the de
 0.02 oct are "static" (NaN — a steady tone must not score). `box`: box-count
 dimension of the loudest 20% of a 64-band log-frequency spectrogram.
 `score` = (2·pref(envβ≈1) + 2·pref(cenβ≈1) + pref(box≈1.6)) / 5.
+
+The score is one render's: the reverb impulse is fresh noise each time, so
+compare points with `--repeat` when they differ by less than ~0.1, and
+compare them **in the same run** — a whole run has shifted by 0.2 for one
+point (0.70±0.00 vs 0.89±0.07), cause not found yet.
+`--character` says what kind of sound it is (`src/analysis/character.ts`):
+`drop` (median − p5 of 400 ms loudness, dB — does the band break?), `swing`
+(p95 − p5), `low` (energy share < 200 Hz), `harm` (peak energy on one
+harmonic grid), `rough` (Plomp–Levelt, level-independent), `mot1`/`mot10`
+(RMS dB change of the spectrum over 1 s / 10 s). `--ref 0,3,5,6,8` prints
+each point's RMS z-distance to that group — the five presets from
+formula-synth's FX-mod family, the ones people liked most — and names the
+metrics more than 2 sd away.
 
 ## Don'ts
 

@@ -18,6 +18,8 @@ npm run analyze -- --configs 30@22050,24@8000  # does a cheap render rank like a
 npm run analyze -- --preset 0 --mutants 8      # what 👍/👎 would propose, scored
 npm run analyze -- --random 12                 # presets vs random points
 npm run analyze -- --preset 0 --wav shots/wav  # WAVs to listen to / re-analyze
+npm run analyze -- --preset 12 --repeat 4      # mean ± sd over renders (reverb = fresh noise)
+npm run analyze -- --character --ref 0,3,5,6,8 # what kind of sound + distance to the liked family
 npx vitest run tests/continuity.test.ts tests/onsets.test.ts
 ```
 
@@ -37,6 +39,25 @@ what users hear. It needs the Vite dev server (it imports `/src/*.ts`).
 | swell range | ±0.3…0.9 on drones | drives the exposure pulse |
 | clicks at a switch | 0 | `analyze.mjs --switch`; attacks inside struck presets are *not* faults |
 | roughness ratio (continuity test) | < 1.3 | modulated vs unmodulated HF energy; >2 means phase jumps |
+| score sd (`--repeat`) | ≤ 0.03 on liked presets | larger = the point sits on a preference cliff (envβ≈2); average before comparing |
+| `drop` (`--character`) | drones 3–6 dB; drips/bells 8–12 | how deep the sound falls out; the liked family never breaks |
+| `low` | liked family 0.65–0.96 | energy share < 200 Hz — "fat" |
+| `harm` | liked family 0.5–0.9 | one harmonic grid; inharmonic bells rub against a drone |
+| `--ref` distance | ≲ 1.5 = inside the family's spread | the metrics > 2 sd away say where a new preset differs |
+
+## Designing a preset (the method that worked for *Overtone steppe*)
+
+1. Profile the family you are aiming at: `--character --ref …` over it.
+2. Put the draft and its variants into `PRESETS` temporarily and render
+   them in one run with `--wav`; compare with `--repeat 3+`, not one render
+   (the draft read 0.28 and 0.52 on two renders), and only within one run:
+   whole runs have shifted by ~0.2 for the same point (cause still open).
+3. Fractality is not the concept: check the idea itself on the WAVs too
+   (for the whistle: the harmonic under the resonance was +10…25 dB against
+   the same render with the filter off — a stricter "lead over the whole
+   register" measure could not tell the whistle from the drone's ripple).
+4. Screenshot the picture with sound on after ≥ 2 min (`snap --sound
+   --wait 120000`), and once after 5 min to see it doesn't die out.
 
 ## Tuning a threshold (the method that worked)
 

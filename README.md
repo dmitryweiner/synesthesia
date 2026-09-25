@@ -132,6 +132,18 @@ Chromium and reports, per point:
 | `box` | box-counting dimension of the spectrogram's loudest cells |
 | `score` | the above folded into 0..1 (`src/analysis/fractal.ts`) |
 
+With `--character` (`src/analysis/character.ts`) it also says what *kind*
+of sound it is:
+
+| column | meaning |
+|---|---|
+| `drop` | how deep the sound falls out: median minus 5th percentile of 400 ms loudness, dB |
+| `swing` | how far it breathes: 95th minus 5th percentile, dB |
+| `low` | share of energy below 200 Hz (weight) |
+| `harm` | share of spectral-peak energy on one harmonic grid |
+| `rough` | Plomp–Levelt roughness of the peaks (level-independent) |
+| `mot1` / `mot10` | how much the spectrum changes over 1 s / 10 s, dB |
+
 ```bash
 node scripts/analyze.mjs --random 12              # presets vs random points
 node scripts/analyze.mjs --preset 0 --mutants 8   # what 👍/👎 would propose
@@ -140,6 +152,10 @@ node scripts/analyze.mjs --mutants 5 --configs 30@22050,8@16000
 node scripts/analyze.mjs --preset 0 --wav shots/wav
 node scripts/analyze.mjs --switch 0,3,10,7 --at 12  # clicks at preset switches
 node scripts/analyze.mjs --onsets                  # onset hits per preset at 60/30/15 fps
+node scripts/analyze.mjs --preset 12 --repeat 4     # mean ± sd over 4 renders (the reverb is fresh noise each time)
+node scripts/analyze.mjs --character --ref 0,3,5,6,8
+                                                  # + character columns, and every point's distance
+                                                  #   to a reference group of presets
 node scripts/analyze.mjs --render                  # frames per second, per grid × canvas
 node scripts/analyze.mjs --render --passes         # ms per pass (fields / react / display)
 ```
