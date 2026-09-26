@@ -539,32 +539,38 @@ export const PRESETS: readonly Preset[] = [
   }),
 
   preset('Candle glaze', {
-    // Every LFO is pink (1/f, PLAN.md #18): the drone's flame, a resonant
-    // low-pass over a 49 Hz grid, rises and sinks with the statistics of a
-    // real flame, of wind or a heartbeat, at four unrelated rates, so it
-    // never repeats. Three slow ones (0.013–0.034 Hz) carry the big
-    // gestures (the flame's height, the beating pair, the echo); a fast one
-    // (0.34 Hz) flickers the FM lace, because a flame flickers faster than
-    // it breathes. Bass: a nearly pure 49 Hz sine (dist, α 0.9).
-    // Picture: Glaze worms drifting up; the flame-height LFO also moves
-    // Feed, the 0.034 Hz one turns the light, the slowest one the hue.
-    // Measured (60 s, two seeded rooms): fractality 0.87 ± 0.08 against
-    // 0.84 for the same preset on sine LFOs, whose timbre is smoother
-    // (cenβ 1.48 vs 1.32; 1 is 1/f). Distance 0.94 to the liked family.
+    // Every LFO is pink (1/f, PLAN.md #18): the drone's flame, a high shelf
+    // over a 49 Hz grid, brightens and dims with the statistics of a real
+    // flame, of wind or a heartbeat, at four unrelated rates, so it never
+    // repeats. Above it, iridescence (the user, 2026-09-26: "calm and
+    // pleasant, especially the picture, but a bit monotonous"): chaotic
+    // logistic arpeggios whose r the slow flame LFO carries through windows
+    // of order and chaos, an FM lace at 1568 Hz whose sidebands ripple as a
+    // 0.34 Hz pink LFO flickers its index, the additive drone's travelling
+    // wave, and shimmer on the echo. Bass: a nearly pure 49 Hz sine.
+    // Picture: Glaze worms drifting up; the flame LFO also moves Feed, the
+    // 0.034 Hz one turns the light (and the phaser's pace), the slowest one
+    // the hue.
+    // Measured (60 s, two seeded rooms): fractality 0.91 ± 0.01, loudness
+    // β 0.99 — exactly 1/f. A deeper, faster-swept phaser read 0.77 with
+    // β 0.37 (nervous), so its pink sweep stays shallow. Distance 0.92 to
+    // the liked family; the spectrum still changes less over 10 s than
+    // theirs (−2.2 sd). Roughness 0.18, inside the family's 0.09–0.25.
     masterGain: 0.72,
     fx: {
       ...LIMITED,
-      filterOn: true, filterType: 'lowpass', filterFreq: 1400, filterQ: 4,
+      filterOn: true, filterType: 'highshelf', filterFreq: 1500, filterGain: 0,
       chorusOn: true, chorusMode: 'chorus', chorusRate: 0.06, chorusDepth: 6, chorusMix: 0.3, chorusFb: 0.2,
       phaserOn: true, phaserRate: 0.2, phaserDepth: 0.6, phaserStages: 6, phaserFb: 0.35, phaserMix: 0.35,
-      delayOn: true, delayTime: 0.71, delayFb: 0.4, delayMix: 0.25,
+      delayOn: true, delayTime: 0.71, delayFb: 0.45, delayMix: 0.3, delayShimmer: 0.35,
       reverbOn: true, reverbDecay: 5.5, reverbMix: 0.4,
     },
     formulas: {
-      additive: { gain: 0.5, fund: 49, N: 28, move: 0.08 },
+      additive: { gain: 0.5, fund: 49, N: 28, move: 0.25 },
       dist: { gain: 0.26, fd: 49, alpha: 0.9 },
-      fm: { gain: 0.14, fc: 392, fm: 49, I: 3 },
+      fm: { gain: 0.14, fc: 1568, fm: 49, I: 4 },
       beats: { gain: 0.22, fbeat: 98, df: 0.3 },
+      logistic: { gain: 0.14, base: 784, depth: 1000, r: 3.72, lfoHz: 7 },
     },
     reaction: { feed: 0.037, kill: 0.06, speed: 16 },
     fieldVariation: { feedVarAmount: 0.008, feedVarScale: 3, feedVarWarp: 1.2, killVarAmount: 0.004, killVarScale: 4, killVarWarp: 1 },
@@ -577,34 +583,40 @@ export const PRESETS: readonly Preset[] = [
       { shape: 'pink', rate: 0.013, phase: 0.9 },
     ],
     routes: [
-      { src: 0, target: 'fx', param: 'filterFreq', depth: 0.25, exp: true },
+      { src: 0, target: 'fx', param: 'filterFreq', depth: 0.15, exp: true },
+      { src: 0, target: 'fx', param: 'filterGain', depth: 0.3 },
+      { src: 0, target: 'logistic', param: 'r', depth: 0.2 },
       { src: 0, target: 'reaction', param: 'feed', depth: 0.15 },
       { src: 2, target: 'fm', param: 'I', depth: 0.15 },
       { src: 1, target: 'palette', param: 'lightAngle', depth: 0.4 },
+      { src: 1, target: 'fx', param: 'phaserRate', depth: 0.1, exp: true },
       { src: 2, target: 'fx', param: 'chorusDepth', depth: 0.3 },
-      { src: 2, target: 'fx', param: 'reverbMix', depth: 0.2 },
+      { src: 2, target: 'logistic', param: 'lfoHz', depth: 0.12, exp: true },
       { src: 3, target: 'beats', param: 'df', depth: 0.01 },
-      { src: 3, target: 'fx', param: 'delayFb', depth: 0.15 },
+      { src: 3, target: 'fx', param: 'delayShimmer', depth: 0.25 },
       { src: 3, target: 'palette', param: 'shift', depth: 0.1 },
     ],
     coupling: { brightToShift: 0.4, loudToGloss: 0.5, onsetToLight: 0.3, loudToPulse: 0.7, onsetToFlash: 0.3, onsetToSeed: 0.4, spectrumToTint: 0.6 },
   }),
 
   preset('Tanpura halo', {
-    // A drone that breathes in plucks (PLAN.md #20): four tanpura strings
-    // Pa–Sa–Sa–Sa on a 65 Hz Sa, plucked in a 7 s cycle, with the jawari
-    // buzz (a pink LFO lets it come and go), a round 65 Hz sine under them,
-    // and an echo that climbs an octave on every pass: the halo. One sine
-    // LFO swells the shimmer and the picture's gloss and light together.
+    // A drone that breathes in plucks (PLAN.md #20, #25): four tanpura
+    // strings Pa–Sa–Sa–Sa on a 65 Hz Sa, plucked in an unhurried 14 s cycle
+    // (the user: "natural like a sitar and new, electronic at once" — and
+    // lyrical, so half as many plucks as the first draft), with the jawari
+    // buzz (a pink LFO lets it come and go), a round 65 Hz sine, a singing
+    // bowl an octave up whose modes beat slowly (a triangle LFO rubs it
+    // louder and softer), the sea far behind, and an echo that climbs an
+    // octave on every pass: the halo. One sine LFO swells the shimmer and
+    // the picture's gloss and light together.
     // Picture: Verdigris cells that divide (Pearson η, F 0.034, k 0.063);
     // every pluck the onset detector hears seeds a new cell and a ripple.
-    // Measured (60 s, two seeded rooms): distance 0.91 to the liked family,
-    // no metric beyond 2 sd; dropout 4.6 dB; 20–23 onset hits per 30 s (the
-    // detector hears nearly every pluck and some echoes). Shimmer on vs off:
-    // +4 dB at 4–8 kHz, +12.5 dB above 8 kHz, within 0.2 dB below 2 kHz.
-    // Fractality 0.67 ± 0.07: the fat sine (gain 0.42, low-end share 0.84)
-    // smooths the loudness contour. At 0.3 it read 0.87 with a thin bottom
-    // (0.62); the bass won (the user's taste: round and fat).
+    // Measured (60 s, two seeded rooms): distance 0.99 to the liked family,
+    // no metric beyond 2 sd; dropout 4.5 dB; 9 onset hits per 30 s (23 at
+    // the 7 s cycle). Shimmer on vs off (first draft): +4 dB at 4–8 kHz,
+    // +12.5 dB above 8 kHz, within 0.2 dB below 2 kHz. Fractality 0.56:
+    // with plucks this rare, the slow bowl, sea and fat sine set the
+    // loudness contour — lyrical on purpose, not a score to chase.
     masterGain: 0.68,
     fx: {
       ...LIMITED,
@@ -614,8 +626,10 @@ export const PRESETS: readonly Preset[] = [
       reverbOn: true, reverbDecay: 7, reverbMix: 0.45,
     },
     formulas: {
-      tanpura: { gain: 1, tanSa: 65, tanCycle: 7, tanJawari: 0.6, tanSustain: 16, tanBright: 0.3 },
+      tanpura: { gain: 1, tanSa: 65, tanCycle: 14, tanJawari: 0.6, tanSustain: 24, tanBright: 0.3 },
       dist: { gain: 0.42, fd: 65, alpha: 0.9 },
+      bowl: { gain: 0.3, bowlF: 130, bowlBeat: 0.3, bowlBright: 0.35 },
+      ocean: { gain: 0.25, oceanRate: 0.07, oceanCut: 600, oceanDepth: 0.8 },
     },
     reaction: { feed: 0.034, kill: 0.063, speed: 14 },
     flow: { curlStrength: 0.006, curlScale: 3, advectAmount: 0.2, evolveRate: 0.006 },
@@ -632,6 +646,7 @@ export const PRESETS: readonly Preset[] = [
       { src: 1, target: 'tanpura', param: 'tanJawari', depth: 0.2 },
       { src: 2, target: 'fx', param: 'reverbMix', depth: 0.2 },
       { src: 2, target: 'fx', param: 'chorusDepth', depth: 0.3 },
+      { src: 2, target: 'bowl', param: 'gain', depth: 0.12 },
       { src: 3, target: 'fx', param: 'delayFb', depth: 0.1 },
       { src: 0, target: 'palette', param: 'lightAngle', depth: 0.4 },
     ],
@@ -640,4 +655,6 @@ export const PRESETS: readonly Preset[] = [
 ];
 
 export const DEFAULT_PRESET_INDEX = 0;
+
+
 

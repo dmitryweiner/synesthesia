@@ -12,7 +12,8 @@ you don't, and the search follows.
   sound formulas are on and their parameters (21 generators from
   [formula-synth](../formula-synth/): additive, FM, Lorenz/Rössler chaos,
   logistic map, Shepard tone, Risset bell, noises, …, plus a tanpura:
-  four plucked strings with the jawari buzz), the FX chain (filter,
+  four plucked strings with the jawari buzz, and a singing bowl whose
+  inharmonic modes beat slowly), the FX chain (filter,
   chorus/flanger, phaser, delay with an octave-up shimmer, reverb,
   limiter), the image
   simulation (Gray–Scott reaction-diffusion with spatial feed/kill

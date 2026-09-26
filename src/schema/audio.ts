@@ -178,6 +178,13 @@ export const FORMULAS: readonly FormulaDef[] = [
       { k: 'tanSustain', name: 'Sustain (s)', min: 2, max: 30, step: 0.1, value: 16, exp: true },
       { k: 'tanBright', name: 'Pluck brightness', min: 0, max: 1, step: 0.01, value: 0.45 },
     ] },
+  { id: 'bowl', title: 'Singing bowl', tag: 'Drone', desc: 'four inharmonic modes, each a slowly beating pair — a breathing hum',
+    sliders: [
+      { k: 'gain', name: 'Gain', min: 0, max: 1, step: 0.001, value: 0.25 },
+      { k: 'bowlF', name: 'Pitch (Hz)', min: 40, max: 800, step: 0.1, value: 130, exp: true },
+      { k: 'bowlBeat', name: 'Breathing (Hz)', min: 0.05, max: 3, step: 0.01, value: 0.4, exp: true },
+      { k: 'bowlBright', name: 'Upper modes', min: 0, max: 1, step: 0.01, value: 0.4 },
+    ] },
 ];
 
 export function formulaDef(id: string): FormulaDef | undefined {

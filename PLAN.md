@@ -505,6 +505,57 @@ B7 real preferences. **Rejected:** A8.
     down to 0.25 for that). Fractality 0.67, because the fat bass smooths
     the loudness contour (0.87 with a thinner bass) — bass kept.
 
+## Decisions after listening to the new presets (agreed with the user, 2026-09-26)
+
+25. **Tanpura halo: more lyrical, with bowls and waves.** The user: the new
+    instrument is "very pleasant, natural (like a sitar) and at the same
+    time new, electronic". Changes asked for:
+    - plucks about **half as often**, so the piece is more lyrical (the
+      cycle 7 → ~14 s; this also answers the onset question of #20: fewer
+      hits, not a different detector);
+    - a **background breathing hum like Tibetan singing bowls**: a new
+      formula, `bowl` (the user chose a real bowl timbre over a plain
+      beating pair): a few inharmonic partials (≈ 1 : 2.71 : 5.12 : 8.21),
+      each a slightly detuned pair, so every partial beats slowly and the
+      hum "breathes" (wah-wah), higher partials faster. It is the 23rd
+      formula and evolution can use it too;
+    - **the sound of waves** in the background (the existing `ocean`).
+26. **Candle glaze: keep the calm and the picture, add psychedelia.** The
+    user: "a very pleasant calm track (especially the visual)", but a
+    little too monotonous; it lacks high, fractal, iridescent motion.
+    Changes: high chaotic arpeggios from the logistic map, whose `r` a
+    pink LFO carries through windows of order and chaos (never the same
+    twice); shimmer on the echo; and a filter that no longer cuts the top
+    (the low-pass capped everything above ~2 kHz).
+
+### How #25–26 came out (2026-09-26, waiting for the user's ears)
+
+WAVs: `shots/tanpura-halo/3-v2-lyrical-bowl-waves.wav`,
+`shots/candle-glaze/3-v2-iridescent.wav` (the first versions sit next to
+them as 1-…).
+
+- *`bowl`* (tests/bowl.test.ts): modes at 1 : 2.71 : 5.12 : 8.21, each a
+  pair (the twin at 0.7, so a mode swells and ebbs but never goes silent)
+  split by `bowlBeat·√ratio` Hz; normalized so it never exceeds ±1; phases
+  accumulate (it is in the continuity suite).
+- *Tanpura halo:* a 14 s pluck cycle (the strings' sustain up to 24 s),
+  the bowl on 130 Hz breathing at 0.3 Hz and rubbed by a triangle LFO,
+  soft `ocean` waves. 9 onset hits per 30 s (23 before; #20 had aimed at
+  4–8), dropout 4.5 dB, distance 0.99, no clicks at preset switches.
+  Fractality 0.56: with rare plucks the slow layers set the loudness
+  contour. That is the lyricism asked for, not a score to chase.
+- *Candle glaze:* the first iridescence draft was **invisible on the
+  `--png` waterfall**: the logistic arpeggio (284–1284 Hz) sat inside the
+  drone's own harmonics at a twelfth of their level. What made it: the
+  FM lace moved up to 1568 Hz (sidebands 1–2.5 kHz, on the 49 Hz grid),
+  a louder arpeggio, the additive's travelling wave 3× faster, and deeper
+  slow sweeps of the shelf and of `r`. A deep phaser with a wide pink
+  sweep of its rate made the loudness nervous (β 0.37, score 0.77); a
+  shallow sweep gives β 0.99, score 0.91 ± 0.01. Distance 0.92, but the
+  10 s spectral change is still low for the family (−2.2 sd).
+- *Picture metrics* over 3 minutes: both keep changing, the tanpura's
+  cells hold ~0.42 coverage, *Candle glaze* ~0.66.
+
 ## Architecture
 
 ```

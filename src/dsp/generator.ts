@@ -17,13 +17,13 @@ export type FormulaId =
   | 'fm' | 'logistic' | 'gliss' | 'additive' | 'pm' | 'beats' | 'dist' | 'quasi'
   | 'lorenz' | 'karplus' | 'noiselp' | 'pinknoise' | 'brownnoise' | 'velvetnoise'
   | 'rossler' | 'shepard' | 'bytebeat' | 'bell' | 'ocean' | 'risset' | 'rain'
-  | 'tanpura';
+  | 'tanpura' | 'bowl';
 
 export const FORMULA_IDS: readonly FormulaId[] = [
   'fm', 'logistic', 'gliss', 'additive', 'pm', 'beats', 'dist', 'quasi',
   'lorenz', 'karplus', 'noiselp', 'pinknoise', 'brownnoise', 'velvetnoise',
   'rossler', 'shepard', 'bytebeat', 'bell', 'ocean', 'risset', 'rain',
-  'tanpura',
+  'tanpura', 'bowl',
 ];
 
 const FORMULA_ID_SET: ReadonlySet<string> = new Set(FORMULA_IDS);
@@ -61,6 +61,7 @@ export const DEFAULT_PARAMS: Readonly<Params> = {
   rissF0: 480, rissDecay: 5, rissPeriod: 6,
   rainDensity: 4, rainPitch: 900, rainBed: 0.15,
   tanSa: 55, tanCycle: 5, tanJawari: 0.5, tanSustain: 16, tanBright: 0.45,
+  bowlF: 130, bowlBeat: 0.4, bowlBright: 0.4,
 };
 
 // Classic bytebeat recipes: integer t, result taken mod 256.
@@ -79,6 +80,17 @@ const RISSET_AMP: readonly number[] = [1, 0.67, 1, 1.8, 2.67, 1.67, 1.46, 1.33, 
 const RISSET_DET: readonly number[] = [0, 1, 0, 1.7, 0, 0, 0, 0, 0, 0, 0]; // Hz offset
 const RISSET_DUR: readonly number[] = [1, 0.9, 0.65, 0.55, 0.325, 0.35, 0.25, 0.2, 0.15, 0.1, 0.075];
 const RISSET_AMP_SUM = RISSET_AMP.reduce((s, a) => s + a, 0);
+
+// A singing bowl (PLAN.md #25), the rubbed kind that hums. Its modes are
+// inharmonic (≈ 1 : 2.71 : 5.12 : 8.21 in Tibetan bowls), and each comes as
+// a PAIR split by a fraction of a hertz, because a bowl is never perfectly
+// round: every partial beats slowly (higher modes faster, ∝ √ratio), which
+// is the bowl's breathing wah. The second tone of each pair is quieter, so
+// a partial swells and ebbs but never falls silent.
+const BOWL_RATIO: readonly number[] = [1, 2.71, 5.12, 8.21];
+const BOWL_AMP: readonly number[] = [1, 0.6, 0.35, 0.2];
+const BOWL_SPLIT: readonly number[] = BOWL_RATIO.map(Math.sqrt);
+const BOWL_PAIR = 0.7;
 
 const TWO_PI = 2 * Math.PI;
 const GLISS_SPAN = Math.log(16); // restart a glissando after 4 octaves
@@ -142,6 +154,7 @@ export class FormulaGenerator {
   private rainNext = 0;
 
   private tanpura: Tanpura | null = null; // src/dsp/tanpura.ts, only for 'tanpura'
+  private bowlPhases = new Float64Array(8); // [mode k: tone, its beating twin]
 
   // Block-rate modulation. modT is absolute LFO time; NOT reset by reset()
   // (reset restarts the sound, not the modulation).
@@ -196,6 +209,7 @@ export class FormulaGenerator {
     this.dropT = 1e9; this.dropPhase = 0; this.dropFreq = 0; this.dropAmp = 0;
     this.rainCounter = 0; this.rainNext = 0;
     this.tanpura?.reset();
+    this.bowlPhases.fill(0);
   }
 
   private initKS(force: boolean): void {
@@ -516,6 +530,26 @@ export class FormulaGenerator {
         case 'tanpura':
           x = this.tanpura ? this.tanpura.next(p.tanSa, p.tanCycle, p.tanJawari, p.tanSustain, p.tanBright) : 0;
           break;
+        case 'bowl': {
+          const f = Math.max(20, p.bowlF);
+          const beat = Math.max(0, p.bowlBeat);
+          const upper = 0.25 + 1.5 * clamp(p.bowlBright, 0, 1);
+          const bp = this.bowlPhases;
+          let s = 0;
+          let norm = 0;
+          for (let k = 0; k < BOWL_RATIO.length; k++) {
+            const a = k === 0 ? 1 : BOWL_AMP[k] * upper;
+            s += a * (Math.sin(bp[2 * k]) + BOWL_PAIR * Math.sin(bp[2 * k + 1]));
+            norm += a * (1 + BOWL_PAIR);
+            const fk = f * BOWL_RATIO[k];
+            bp[2 * k] += w * fk;
+            bp[2 * k + 1] += w * (fk + beat * BOWL_SPLIT[k]);
+            if (bp[2 * k] > TWO_PI) bp[2 * k] -= TWO_PI;
+            if (bp[2 * k + 1] > TWO_PI) bp[2 * k + 1] -= TWO_PI;
+          }
+          x = s / norm; // |x| ≤ 1 at any brightness
+          break;
+        }
       }
 
       out[i] = x * (p.gain ?? 0.2);

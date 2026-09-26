@@ -29,7 +29,10 @@ Fractality alone doesn't describe it (Polivoks was liked at 0.49).
 
 The user's own taste (memory `sound-taste`): bright, resonant overtone
 detail on top is loved ("5+"). The bass must be **round, fat and melodic,
-not rough**. A 55 Hz sawtooth's low harmonics are rough by themselves; the
+not rough**. Attacks sparse and lyrical (the tanpura's plucks were asked to
+come half as often), slow breathing layers underneath (bowls, waves), and
+a calm piece still needs high, never-repeating iridescence, or it reads as
+monotonous (PLAN.md #25–26). A 55 Hz sawtooth's low harmonics are rough by themselves; the
 cure is a strong smooth fundamental under them (e.g. `dist` at α ≈ 0.9 is
 an almost pure sine), not removing grit elsewhere.
 
@@ -40,9 +43,11 @@ it into the preset's comment. Already used: comb-filter moiré (Loom,
 Fractal garden), a peaking glow (Silver maze), a resonant LP sweep
 (Polivoks), Shepard grids, logistic bifurcations, FM fans, a Q-30 overtone
 whistle (Overtone steppe). Mechanics added on 2026-09-26 and not yet
-used by a built-in: the **pink** LFO shape (1/f wandering, PLAN.md #18),
-the **tanpura** formula (plucked Pa–Sa–Sa–Sa strings with jawari buzz) and
-**delay shimmer** (every echo an octave up), PLAN.md #20. More candidate
+used widely yet: the **pink** LFO shape (1/f wandering, PLAN.md #18), the
+**tanpura** formula (plucked Pa–Sa–Sa–Sa strings with jawari buzz),
+**delay shimmer** (every echo an octave up), PLAN.md #20, and the
+**bowl** formula (a breathing singing-bowl hum, PLAN.md #25). *Candle
+glaze* and *Tanpura halo* use them. More candidate
 moves are in PLAN-IMPROVEMENTS.md, part A. Some need new mechanics: agree
 those with the user first.
 

@@ -199,7 +199,7 @@ Corollaries:
 ## Module map
 
 ```
-src/dsp/generator.ts   22 formulas, per-sample, pure; block-rate LFO modulation
+src/dsp/generator.ts   23 formulas, per-sample, pure; block-rate LFO modulation
                        overwrite-then-restore in fill(), each param once, all
                        its routes added up. EVERY oscillator
                        accumulates phase (ph1..ph4, rissPhases): the ported
@@ -208,7 +208,9 @@ src/dsp/generator.ts   22 formulas, per-sample, pure; block-rate LFO modulation
                        PLAN.md "Bugs"). gliss: log-frequency state, restarts
                        after 4 octaves
 src/dsp/tanpura.ts     the tanpura formula: 4 KS strings Pa–Sa–Sa–Sa, a pluck
-                       cycle, jawari = a bridge-contact pulse per string
+                       cycle, jawari = a bridge-contact pulse per string.
+                       (`bowl`, the singing bowl — 4 inharmonic modes, each a
+                       slowly beating pair — lives inline in generator.ts)
 src/dsp/shimmer.ts     OctaveShimmer: octave-up grains for the delay's feedback
                        loop; amount 0 is a bit-exact pass-through
 src/dsp/mod.ts         LFO (pure function of absolute time; shapes append-only,

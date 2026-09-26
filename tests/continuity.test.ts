@@ -59,6 +59,7 @@ const TONAL: readonly [FormulaId, readonly string[], Params?][] = [
   ['shepard', ['shepBase']],
   ['bell', ['bellF0'], { bellPeriod: 20, bellDecay: 8 }],
   ['risset', ['rissF0'], { rissPeriod: 20, rissDecay: 12 }],
+  ['bowl', ['bowlF', 'bowlBeat']],
 ];
 
 /** HF roughness: RMS of the 2nd difference over RMS of the 1st — amplitude-free. */
