@@ -30,7 +30,7 @@ import type { SavedPoint } from './state/library';
 import { migrateLegacyPoints } from './state/migrate';
 import { renderPointList } from './ui/pointList';
 import type { PointRow } from './ui/pointList';
-import { keepScreenAwake } from './ui/wakelock';
+import { ScreenAwake, browserWakeLockEnv } from './ui/wakelock';
 import {
   canvasUv, strokePoints, TOUCH_AMOUNT, TOUCH_MAX_STAMPS, TOUCH_RADIUS, TOUCH_SPACING,
 } from './ui/touch';
@@ -548,13 +548,13 @@ function boot(): void {
   }
 
   // Phones dim the screen while you watch: take a wake lock on the first
-  // gesture (that's when browsers grant it) and re-take it after the tab was
-  // hidden — see ui/wakelock.ts.
-  function stayAwake(): void {
-    void keepScreenAwake().then((ok) => {
-      if (ok) document.body.dataset.awake = '1';
-    });
-  }
+  // gesture (that's when browsers grant it); ui/wakelock.ts takes it again
+  // whenever the page comes back (screen unlocked, app switched back) or,
+  // failing that, on the next touch.
+  const screenAwake = new ScreenAwake(browserWakeLockEnv(), (on) => {
+    document.body.dataset.awake = on ? '1' : '0';
+  });
+  const stayAwake = (): void => { void screenAwake.keep(); };
   for (const ev of ['pointerdown', 'keydown']) {
     document.addEventListener(ev, stayAwake, { once: true });
   }

@@ -1,43 +1,104 @@
 // Screen Wake Lock: don't let a phone dim the screen while the piece is
-// running (ported from formula-synth, plus re-acquiring when the tab comes
-// back — a lock is released automatically whenever the page is hidden).
-// Silently degrades where the API is missing (Firefox) or refused.
-let lock: WakeLockSentinel | null = null;
-let wanted = false;
-let listening = false;
+// running (ported from formula-synth). A lock is released whenever the page
+// is hidden (the screen locks, the app switches), so it has to be taken
+// again when the page comes back. Silently degrades where the API is
+// missing (Firefox) or refused.
+//
+// User report (2026-09-26): after locking and unlocking the phone the screen
+// dimmed again until the page was reloaded. Two holes, both closed here:
+// - The browser marks the old lock `released` at once but may fire its
+//   `release` event later — after the page is visible again. The old code
+//   trusted the event, still "held" the dead lock at that moment, skipped
+//   the request, and never tried again. Now `sentinel.released` decides,
+//   and a late event from an old lock can't clear a newer one.
+// - A request refused right after unlocking (a browser that wants focus or
+//   a gesture first) was swallowed, and the gesture listener had already
+//   fired once. Now every touch/key, focus and pageshow retries, cheaply,
+//   whenever no lock is held.
 
-export function isScreenAwake(): boolean {
-  return lock !== null;
+export interface WakeSentinel {
+  readonly released: boolean;
+  addEventListener(type: 'release', fn: () => void): void;
+  release(): Promise<void>;
 }
 
-async function request(): Promise<boolean> {
-  if (!wanted || lock || document.visibilityState !== 'visible') return false;
-  if (!('wakeLock' in navigator)) return false;
-  try {
-    lock = await navigator.wakeLock.request('screen');
-    lock.addEventListener('release', () => { lock = null; });
-    return true;
-  } catch {
-    return false; // not allowed (no gesture yet, low battery, …)
+export interface WakeLockEnv {
+  readonly supported: boolean;
+  visible(): boolean;
+  request(): Promise<WakeSentinel>;
+  /** visibilitychange / focus / pageshow / pointerdown / keydown */
+  on(type: string, fn: () => void): void;
+}
+
+export function browserWakeLockEnv(): WakeLockEnv {
+  return {
+    supported: 'wakeLock' in navigator,
+    visible: () => document.visibilityState === 'visible',
+    request: () => navigator.wakeLock.request('screen'),
+    on: (type, fn) => {
+      if (type === 'focus' || type === 'pageshow') window.addEventListener(type, fn);
+      else document.addEventListener(type, fn, { capture: true, passive: true });
+    },
+  };
+}
+
+const RETRY_EVENTS = ['visibilitychange', 'focus', 'pageshow', 'pointerdown', 'keydown'];
+
+export class ScreenAwake {
+  private lock: WakeSentinel | null = null;
+  private pending: Promise<boolean> | null = null;
+  private wanted = false;
+  private listening = false;
+
+  constructor(private readonly env: WakeLockEnv, private readonly onChange?: (awake: boolean) => void) {}
+
+  get awake(): boolean {
+    return this.lock !== null && !this.lock.released;
   }
-}
 
-/**
- * Keeps the screen awake from now on, re-acquiring after the tab was hidden.
- * Call it from a user gesture: some browsers only grant the lock then.
- */
-export async function keepScreenAwake(): Promise<boolean> {
-  wanted = true;
-  if (!listening) {
-    listening = true;
-    document.addEventListener('visibilitychange', () => { void request(); });
+  /** Keep the screen awake from now on. Call it from a user gesture first. */
+  keep(): Promise<boolean> {
+    this.wanted = true;
+    if (!this.listening && this.env.supported) {
+      this.listening = true;
+      for (const ev of RETRY_EVENTS) this.env.on(ev, () => { void this.ensure(); });
+    }
+    return this.ensure();
   }
-  return request();
-}
 
-export async function releaseScreenAwake(): Promise<void> {
-  wanted = false;
-  const current = lock;
-  lock = null;
-  if (current) await current.release().catch(() => {});
+  async release(): Promise<void> {
+    this.wanted = false;
+    const current = this.lock;
+    this.lock = null;
+    if (current && !current.released) await current.release().catch(() => {});
+    this.onChange?.(false);
+  }
+
+  private ensure(): Promise<boolean> {
+    if (!this.wanted || !this.env.supported || !this.env.visible()) return Promise.resolve(false);
+    if (this.awake) return Promise.resolve(true);
+    if (this.pending) return this.pending;
+    this.pending = this.env.request().then(
+      (sentinel) => {
+        this.pending = null;
+        if (!this.wanted) {
+          void sentinel.release().catch(() => {});
+          return false;
+        }
+        this.lock = sentinel;
+        sentinel.addEventListener('release', () => {
+          if (this.lock !== sentinel) return; // an old lock's late event
+          this.lock = null;
+          this.onChange?.(false);
+        });
+        this.onChange?.(true);
+        return true;
+      },
+      () => {
+        this.pending = null;
+        return false; // refused (no gesture yet, low battery, …): the next event retries
+      },
+    );
+    return this.pending;
+  }
 }
