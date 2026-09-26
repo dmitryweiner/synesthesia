@@ -15,11 +15,11 @@
 // second tab's navigation to time out.
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { parseFlags, ensureServer, launchBrowser, captureErrors, openApp, withRes, withParam, startPointsWorker } from './lib.mjs';
+import { parseFlags, startServer, launchBrowser, captureErrors, openApp, withRes, withParam, startPointsWorker } from './lib.mjs';
 
 const { flags } = parseFlags(process.argv.slice(2), ['screenshot', 'res']);
 const RES = Number(flags.get('res') ?? 128);
-const { BASE, stop } = await ensureServer(flags.has('preview'));
+const { BASE, stop } = await startServer(flags.has('preview'));
 const worker = await startPointsWorker();
 // every app URL: small grid + the local points Worker
 const app = (url) => withParam(withRes(url, RES), 'api', worker.url);

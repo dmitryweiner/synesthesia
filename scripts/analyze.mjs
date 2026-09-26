@@ -55,7 +55,7 @@
 // (box-counting dimension of the spectrogram's loudest cells), dB.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { parseFlags, ensureServer, launchBrowser, captureErrors, openApp, withParam } from './lib.mjs';
+import { parseFlags, startServer, launchBrowser, captureErrors, openApp, withParam } from './lib.mjs';
 
 const { flags } = parseFlags(process.argv.slice(2), ['preset', 'hash', 'secs', 'sr', 'mutants', 'random', 'wav', 'json', 'seed', 'configs', 'switch', 'at', 'fps', 'grid', 'scale', 'size', 'warm', 'reps', 'repeat', 'ref']);
 const SECS = Number(flags.get('secs') ?? 30);
@@ -67,7 +67,7 @@ const SEED = Number(flags.get('seed') ?? 1);
 const fmt = (v, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : '  — ');
 const pad = (s, n) => String(s).padEnd(n).slice(0, n);
 
-const { BASE, stop } = await ensureServer(false);
+const { BASE, stop } = await startServer(false);
 const errors = [];
 const browser = await launchBrowser();
 
@@ -245,7 +245,11 @@ await openApp(page, `${BASE}/?res=64&scale=64`);
 
 // Build the candidate list in the page (the genome code is TypeScript).
 const candidates = await page.evaluate(async ({ presetArg, hash, mutants, random, seed }) => {
-  const { PRESETS } = await import('/src/presets.ts');
+  // A TEMPORARY `export const VARIANTS` in presets.ts (drafts of a preset
+  // being designed) renders after the built-ins: --preset 13,14,… — the
+  // new-preset skill's loop. tests/presets.test.ts fails if one is committed.
+  const { PRESETS: BUILT_IN, VARIANTS = [] } = await import('/src/presets.ts');
+  const PRESETS = [...BUILT_IN, ...VARIANTS];
   const { decodeStateToken } = await import('/src/state/share.ts');
   const { stateToAppState } = await import('/src/state/schema.ts');
   const { encodeGenome, decodeGenome } = await import('/src/genome/codec.ts');
@@ -285,6 +289,19 @@ async function renderScore(state, secs, sr) {
     );
     return analyzeSound(samples, sr).score;
   }, { state, secs, sr });
+}
+
+/** 16-bit mono WAV of base64 PCM, named after the point's label. */
+function writeWav(dir, label, b64) {
+  mkdirSync(dir, { recursive: true });
+  const pcm = Buffer.from(b64, 'base64');
+  const hdr = Buffer.alloc(44);
+  hdr.write('RIFF', 0); hdr.writeUInt32LE(36 + pcm.length, 4); hdr.write('WAVE', 8);
+  hdr.write('fmt ', 12); hdr.writeUInt32LE(16, 16); hdr.writeUInt16LE(1, 20); hdr.writeUInt16LE(1, 22);
+  hdr.writeUInt32LE(SR, 24); hdr.writeUInt32LE(SR * 2, 28); hdr.writeUInt16LE(2, 32); hdr.writeUInt16LE(16, 34);
+  hdr.write('data', 36); hdr.writeUInt32LE(pcm.length, 40);
+  const name = label.replace(/[^\w]+/g, '_').replace(/^_|_$/g, '');
+  writeFileSync(join(dir, `${name}.wav`), Buffer.concat([hdr, pcm]));
 }
 
 function ranks(xs) {
@@ -447,18 +464,7 @@ for (const c of candidates) {
     ? `  ${[m.dropout, m.swing].map((v) => pad(fmt(v, 1), 5)).join(' ')} ${[m.lowShare, m.harmonicity, m.roughness].map((v) => pad(fmt(v), 5)).join(' ')} ${[m.motion1s, m.motion10s].map((v) => pad(fmt(v, 1), 5)).join(' ')}`
     : '';
   console.log(`${pad(c.label, 34)} ${scoreCol}   ${fmt(m.envBeta)}   ${fmt(m.centroidBeta)}   ${fmt(m.envHiguchi)}   ${fmt(m.boxDim)}   ${fmt(m.loudness, 0)}${charCols}${m.silent ? '  SILENT' : ''}   ${((Date.now() - t0) / 1000).toFixed(1)}s`);
-  if (wavB64) {
-    const dir = flags.get('wav');
-    mkdirSync(dir, { recursive: true });
-    const pcm = Buffer.from(wavB64, 'base64');
-    const hdr = Buffer.alloc(44);
-    hdr.write('RIFF', 0); hdr.writeUInt32LE(36 + pcm.length, 4); hdr.write('WAVE', 8);
-    hdr.write('fmt ', 12); hdr.writeUInt32LE(16, 16); hdr.writeUInt16LE(1, 20); hdr.writeUInt16LE(1, 22);
-    hdr.writeUInt32LE(SR, 24); hdr.writeUInt32LE(SR * 2, 28); hdr.writeUInt16LE(2, 32); hdr.writeUInt16LE(16, 34);
-    hdr.write('data', 36); hdr.writeUInt32LE(pcm.length, 40);
-    const name = c.label.replace(/[^\w]+/g, '_').replace(/^_|_$/g, '');
-    writeFileSync(join(dir, `${name}.wav`), Buffer.concat([hdr, pcm]));
-  }
+  if (wavB64) writeWav(flags.get('wav'), c.label, wavB64);
 }
 
 // --ref 0,3,5,6,8: how far each point sits from a reference group of

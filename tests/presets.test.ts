@@ -1,6 +1,7 @@
 // Every built-in preset must be a fully valid point: it survives the
 // sanitize/clamp round trip unchanged, round-trips through the genome,
 // actually makes sound, and links sound to image (routes or coupling).
+import * as presetsModule from '../src/presets';
 import { PRESETS, DEFAULT_PRESET_INDEX } from '../src/presets';
 import { sanitizeState, stateToAppState, COUPLING_KEYS, EXPLICIT_COUPLING_KEYS, COUPLING_FLOOR, isModTarget } from '../src/state/schema';
 import { encodeGenome, decodeGenome } from '../src/genome/codec';
@@ -24,6 +25,10 @@ function renderInto(gen: FormulaGenerator, mix: Float32Array): void {
 }
 
 describe('presets: catalogue', () => {
+  it('ships no temporary VARIANTS (drafts rendered by analyze.mjs while designing a preset)', () => {
+    expect(Object.keys(presetsModule)).not.toContain('VARIANTS');
+  });
+
   it('at least 8, unique names, default index valid', () => {
     expect(PRESETS.length).toBeGreaterThanOrEqual(8);
     expect(new Set(PRESETS.map((p) => p.name)).size).toBe(PRESETS.length);

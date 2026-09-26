@@ -10,7 +10,7 @@
 //                                                  # the canvas (fractions of it)
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { parseFlags, ensureServer, launchBrowser, captureErrors, openApp, withRes } from './lib.mjs';
+import { parseFlags, startServer, launchBrowser, captureErrors, openApp, withRes } from './lib.mjs';
 
 const { flags } = parseFlags(process.argv.slice(2), ['out', 'preset', 'hash', 'wait', 'like', 'dislike', 'width', 'height', 'res', 'stroke']);
 if (!flags.has('out')) {
@@ -18,7 +18,7 @@ if (!flags.has('out')) {
     + '[--sound] [--like N] [--dislike N] [--details] [--help] [--width px] [--height px] [--preview]');
   process.exit(1);
 }
-const { BASE, stop } = await ensureServer(flags.has('preview'));
+const { BASE, stop } = await startServer(flags.has('preview'));
 const errors = [];
 const browser = await launchBrowser();
 const page = await browser.newPage({

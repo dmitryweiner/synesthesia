@@ -47,11 +47,16 @@ npm run deploy:cloud  # D1 migrations --remote + wrangler deploy (wrangler is au
 
 TDD: tests first, then code. Commits are allowed at milestone granularity
 (brief). Reuse/extend `scripts/*.mjs` instead of writing one-off scripts.
+**Leave no server running** (the user's rule): scripts start and stop their
+own; a server you start by hand (`npm run dev`, a snapshot's vite), you stop
+before the session ends — `pgrep -af '[b]in/vite'` must print nothing.
 Agreed decisions go into PLAN.md (numbered, dated) — the user asks for that.
 
-Two skills carry the routines: **`verify`** (which checks to run before a
-commit and how to read their failures) and **`sound-check`** (how to measure
-the actual sound and tune thresholds on real renders).
+Three skills carry the routines: **`verify`** (which checks to run before a
+commit and how to read their failures), **`sound-check`** (how to measure
+the actual sound and tune thresholds on real renders) and **`new-preset`**
+(designing or retuning a preset: profile, variants, same-room comparisons,
+the picture over minutes, listening WAVs for the user).
 
 ## How work is done here — measure first
 
@@ -125,15 +130,16 @@ Corollaries:
   ~2.5 cores and a 60 s render went from ~20 s to 60–190 s. It opens with
   `?res=64&scale=64` — keep both if you change that URL.
 - **Long analysis runs die when you edit `src/`** (Vite full-reloads the
-  page). Run them against a snapshot on another port instead:
+  page). Run them from a snapshot instead:
   `rsync -a --exclude node_modules --exclude docs --exclude shots --exclude .git ./ $SNAP/`,
-  symlink `node_modules`, then `SYN_PORT=5180 node scripts/analyze.mjs …`
-  from the snapshot. Snapshot servers used to outlive the run (`stop()`
-  killed npx, not vite; now the whole process group goes): one held :5181
-  for days, and a later run on that port measured the OLD tree.
-  `ensureServer()` now refuses a server that isn't serving this checkout
-  (Vite answers `/@fs/<our root>/package.json` with 403 from anyone else's)
-  — pick another port, don't disable the check.
+  symlink `node_modules`, then `node scripts/analyze.mjs …` from `$SNAP` —
+  the script starts its own server there, on a free port.
+- **Scripts never reuse a server.** `startServer()` (lib.mjs) starts a fresh
+  one for its own checkout on a free port and kills its process group on
+  any exit (normal, crash, Ctrl-C). Reusing whatever answered on :5173 is
+  how a stale snapshot server from an earlier session (it held :5181 for
+  days) got measured instead of the code at hand; killing only `npx` left
+  `vite` running after every run.
 
 ## Headless browser gotchas (this machine: aarch64, SwiftShader)
 
@@ -290,7 +296,7 @@ src/main.ts            wiring only: explorer → 2 s eased genome morph →
                        cleans the URL; loads use audio.switchTo; Share → short
                        link (ClipboardItem with a promise, for Safari)
 cloud/                 Worker (src/index.ts), D1 migration, Miniflare tests
-scripts/lib.mjs        server lifecycle, launchBrowser (CHROMIUM_PATH, autoplay,
+scripts/lib.mjs        startServer (fresh, free port, killed on exit), launchBrowser (CHROMIUM_PATH, autoplay,
                        SwiftShader), openApp (readiness), withRes
 scripts/smoke.mjs      invariants only, never pixels; --mobile, --res, --screenshot
 scripts/snap.mjs       one debug screenshot

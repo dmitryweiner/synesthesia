@@ -67,7 +67,8 @@ when the user asks. After a push, GitHub Pages rebuilds: check
 - **A second tab's `goto` times out** → the sim is starving the CPU; scripts
   pass `?res=128`.
 - **"Execution context was destroyed"** → something edited `src/` while a
-  script was running (Vite full-reloads). Use a snapshot on `SYN_PORT`.
+  script was running (Vite full-reloads). Run it from a snapshot copy
+  (AGENTS.md) — it starts its own server there.
 - **Point comparison differs** → compare with a tolerance; the genome codec
   moves the 15th digit.
 - **Audio checks after `page.reload()`** → the AudioContext is gone; restart

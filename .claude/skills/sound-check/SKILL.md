@@ -25,7 +25,8 @@ npx vitest run tests/continuity.test.ts tests/onsets.test.ts
 
 `analyze.mjs` renders the **real graph** (worklet generators + FX + LFOs)
 through an `OfflineAudioContext` in headless Chromium, so what it measures is
-what users hear. It needs the Vite dev server (it imports `/src/*.ts`).
+what users hear. It starts its own Vite dev server (the page imports
+`/src/*.ts`) and stops it on exit.
 
 ## What the numbers mean
 
@@ -45,19 +46,11 @@ what users hear. It needs the Vite dev server (it imports `/src/*.ts`).
 | `harm` | liked family 0.5–0.9 | one harmonic grid; inharmonic bells rub against a drone |
 | `--ref` distance | ≲ 1.5 = inside the family's spread | the metrics > 2 sd away say where a new preset differs |
 
-## Designing a preset (the method that worked for *Overtone steppe*)
+## Designing or retuning a preset
 
-1. Profile the family you are aiming at: `--character --ref …` over it.
-2. Put the draft and its variants into `PRESETS` temporarily and render
-   them in one run with `--wav`; compare with `--repeat 3+`, not one render
-   (the draft read 0.28 and 0.52 on two renders), and only within one run:
-   whole runs have shifted by ~0.2 for the same point (cause still open).
-3. Fractality is not the concept: check the idea itself on the WAVs too
-   (for the whistle: the harmonic under the resonance was +10…25 dB against
-   the same render with the filter off — a stricter "lead over the whole
-   register" measure could not tell the whistle from the drone's ripple).
-4. Screenshot the picture with sound on after ≥ 2 min (`snap --sound
-   --wait 120000`), and once after 5 min to see it doesn't die out.
+Use the `new-preset` skill: the family profile, variants rendered side by
+side, same-room comparisons (seeded-snapshot.mjs, bands.mjs), the picture
+over minutes, the final checks, and listening WAVs for the user.
 
 ## Tuning a threshold (the method that worked)
 

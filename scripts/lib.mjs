@@ -3,6 +3,7 @@
 import { spawn, execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { createServer } from 'node:net';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium } from 'playwright';
 
@@ -22,42 +23,49 @@ export function parseFlags(argv, valueFlags, repeatable = []) {
   return { flags, lists };
 }
 
+function portIsFree(port) {
+  return new Promise((resolve) => {
+    const probe = createServer();
+    probe.once('error', () => resolve(false));
+    probe.listen({ port, host: 'localhost', exclusive: true }, () => probe.close(() => resolve(true)));
+  });
+}
+
+async function freePort(from) {
+  for (let p = from; p < from + 100; p++) if (await portIsFree(p)) return p;
+  throw new Error(`no free port in ${from}..${from + 99}`);
+}
+
 /**
- * Reuses a running dev (:5173) / preview (:4173) server or spawns one.
- * SYN_PORT overrides the port — e.g. to run a long analysis against a
- * snapshot copy of the project while the working tree keeps changing.
+ * Starts a FRESH dev (or preview) server for this checkout on a free port
+ * and stops it when the script exits — however it exits. Never reuses a
+ * running server: reuse is how stale servers from earlier sessions (one
+ * held :5181 for days, serving an old snapshot) got measured instead of
+ * the code at hand. The server runs from the directory this script lives
+ * in, so a snapshot's scripts serve the snapshot. SYN_PORT pins the port
+ * (fails if it is taken).
  */
-export async function ensureServer(preview) {
-  const PORT = Number(process.env.SYN_PORT) || (preview ? 4173 : 5173);
+export async function startServer(preview) {
+  const PORT = Number(process.env.SYN_PORT) || await freePort(preview ? 4173 : 5173);
   const BASE = `http://localhost:${PORT}`;
-  const up = async () => { try { return (await fetch(BASE)).ok; } catch { return false; } };
-  let proc = null;
-  // A server already on the port may belong to ANOTHER checkout (a stale
-  // snapshot from an earlier session held :5181 for days), and the page
-  // would then measure that tree's code without a word. Vite serves
-  // /@fs/<path> only inside its own workspace, so our package.json answers
-  // 200 from our server and 403 from anyone else's.
-  if (!preview && (await up())) {
-    const mine = await fetch(`${BASE}/@fs${ROOT}package.json`).then((r) => r.ok, () => false);
-    if (!mine) {
-      console.error(`:${PORT} is served from another directory, not ${ROOT} — stop that server or pick a free SYN_PORT`);
-      process.exit(1);
-    }
-  }
-  if (!(await up())) {
-    const cmd = preview
-      ? ['vite', 'preview', '--port', String(PORT), '--strictPort']
-      : ['vite', '--port', String(PORT), '--strictPort'];
-    // Own process group: killing npx alone left vite running, and every
-    // SYN_PORT run leaked a server (four in one session).
-    proc = spawn('npx', cmd, { stdio: 'ignore', detached: true });
-    for (let i = 0; i < 30 && !(await up()); i++) await new Promise((r) => setTimeout(r, 1000));
-    if (!(await up())) { console.error(`server did not start on :${PORT}`); process.exit(1); }
-  }
+  const cmd = preview
+    ? ['vite', 'preview', '--port', String(PORT), '--strictPort']
+    : ['vite', '--port', String(PORT), '--strictPort'];
+  // Own process group, killed as a whole: killing npx alone left vite
+  // running. Being detached, it no longer gets the terminal's Ctrl-C
+  // either, so the signals are forwarded by hand.
+  const proc = spawn('npx', cmd, { cwd: ROOT, stdio: 'ignore', detached: true });
+  let stopped = false;
   const stop = () => {
-    if (!proc) return;
+    if (stopped) return;
+    stopped = true;
     try { process.kill(-proc.pid); } catch { proc.kill(); }
   };
+  process.on('exit', stop);
+  for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, () => { stop(); process.exit(130); });
+  const up = async () => { try { return (await fetch(BASE)).ok; } catch { return false; } };
+  for (let i = 0; i < 30 && !(await up()); i++) await new Promise((r) => setTimeout(r, 1000));
+  if (!(await up())) { console.error(`server did not start on :${PORT}`); process.exit(1); }
   return { BASE, stop };
 }
 
