@@ -3,7 +3,8 @@
 Ideas collected while building *Overtone steppe* (2026-09-25): new sound
 mechanics in the style the project already has (drone / ambient), and the
 measurements we are missing. **Nothing here is agreed.** An item that gets
-agreed moves to PLAN.md "Decisions" with a number and a date.
+agreed moves to PLAN.md "Decisions" with a number and a date. The user
+chose to take these up in the next session (PLAN.md #17).
 
 Each item says what it is, why (with a number where one was measured), what
 it costs, what could go wrong, and how we would know it worked.
@@ -19,7 +20,7 @@ mean of 3:
 |---|---|---|---|---|---|---|---|
 | liked family | 0.49–0.99 | 3.8–5.8 | 9–18 | 0.71–0.95 | 0.52–0.89 | 0.09–0.25 | 4.5–5.8 → 7–11 |
 | drips / wind / bells | 0.52–0.68 | 7.9–12.7 | 16–18 | 0.00–0.21 | 0.35–0.80 | 0.05–0.56 | 5–8 → 7–19 |
-| *Overtone steppe* | ~0.9 | 5.6 | 11 | 0.90 | 0.96 | 0.08 | 5.0 → 7.3 |
+| *Overtone steppe* (first version) | ~0.9 | 5.6 | 11 | 0.90 | 0.96 | 0.08 | 5.0 → 7.3 |
 
 In words: a band that never breaks, weight in the bass, one harmonic grid,
 slow change, and **nothing that repeats** (every family preset runs its
@@ -145,6 +146,12 @@ an explicit per-point switch. Your call.
 ## B. Evaluation: what we're missing
 
 ### B1. Deterministic renders (seeded reverb) — *measured, and one open issue*
+
+*Needed again the next day:* fixing *Overtone steppe*'s bass, the random
+room moved the bass metrics more than the variants did (roughness 0.046
+vs 0.034 for the same point in two runs). Only a throwaway snapshot with a
+seeded impulse — the same three rooms for every variant — made the
+comparison readable.
 
 The reverb impulse is `Math.random()` noise, built fresh for every render,
 and it moves the score. *Overtone steppe* over 14 renders with

@@ -340,6 +340,36 @@ can refuse a save were both removed instead of guessing:
   `visibilitychange` now resumes it, the same way ../formula-synth does.
   (`AudioEngine.resume()` already existed here — nothing had ever called it.)
 
+## Decisions after user listening (agreed with the user, 2026-09-26)
+
+15. **Overtone steppe stays, with a rounder bass.** A 13th preset built on
+    the profile of the presets people liked most (formula-synth's FX-mod
+    family): one 55 Hz harmonic grid, a band that never breaks, and a
+    peaking resonance narrow enough (Q 30, +20 dB) to whistle a melody out
+    of the drone's own overtones. The user's verdict: the top and the
+    high-frequency resonance "5+", the bottom "a bit too rough — make it
+    more melodic and fat". Measured with the same reverb rooms (three
+    seeds) so that variants compare as pairs, not through room noise:
+    - the roughness was the sawtooth's own low harmonics, not the tanh
+      growl — removing the growl changed nothing below 400 Hz;
+    - what cures it is a strong smooth fundamental under them: the growl
+      became a warm, nearly pure 55 Hz sine (tanh at α 0.9, gain 0.28, no
+      stepped drive), and the beating pair breathes slower and louder
+      (0.25 Hz, gain 0.38; S&H now varies its pace instead of the drive);
+    - result: roughness below 400 Hz −30%, the fundamental 0.97 of the
+      bass (was 0.86–0.90), low-mid grit −6.5 dB, the band above 600 Hz
+      unchanged to 0.0 dB (correlation 1.00), fractality 0.89 → 0.96. The
+      price: +6 dB RMS, all of it bass (−26 dB, inside the presets' −24…−35).
+      A gentler middle step was rendered for comparison
+      (`shots/overtone-steppe-bass/`, local only).
+16. **No server outlives its script** (the user's rule). Scripts start a
+    fresh Vite server for their own checkout on a free port and kill its
+    process group on any exit; a server started by hand is stopped before
+    the session ends. Reusing whatever answered on a port had measured a
+    stale snapshot's code (AGENTS.md, test-harness pitfalls).
+17. **PLAN-IMPROVEMENTS.md waits for the next session** — proposals only,
+    nothing from it is implemented yet.
+
 ## Architecture
 
 ```

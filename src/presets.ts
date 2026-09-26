@@ -482,9 +482,16 @@ export const PRESETS: readonly Preset[] = [
     // is on the grid, nothing is ever cut away. Additive `move` is slow
     // (0.05 Hz) so its ripple doesn't swallow the chosen harmonic; the
     // phaser is what lifts fractality from ~0.46 to ~0.9 (analyze.mjs
-    // --repeat); a quiet tanh voice an octave up is the growl under it.
-    // Measured against the liked family (--character --ref 0,3,5,6,8):
-    // distance 0.94, inside the family's own spread (0.75–1.25).
+    // --repeat). Measured against the liked family (--character --ref
+    // 0,3,5,6,8): distance 0.94, inside the family's own spread (0.75–1.25).
+    // The bass (2026-09-26, "the top is 5+, the bottom too rough — make it
+    // more melodic and fat"): the roughness was the sawtooth's own low
+    // harmonics, not the old tanh growl (removing it changed nothing below
+    // 400 Hz). What cures it is a strong smooth fundamental under them: tanh
+    // at α 0.9 is a warm, nearly pure 55 Hz sine, and the beating pair
+    // breathes slower and louder. Same reverb rooms, three seeds: roughness
+    // below 400 Hz −30%, fundamental 0.86–0.90 → 0.97 of the bass, low-mid
+    // grit −6.5 dB, the band above 600 Hz unchanged to 0.0 dB.
     // Image: stripes = harmonics, blown sideways by a steady steppe wind
     // (Drift X) that erodes them into a pale haze. The LFO that sweeps the
     // whistle also swings the light across the ridges, and the triangle
@@ -500,8 +507,8 @@ export const PRESETS: readonly Preset[] = [
     },
     formulas: {
       additive: { gain: 0.55, fund: 55, N: 36, move: 0.05 },
-      beats: { gain: 0.3, fbeat: 55, df: 0.45 },
-      dist: { gain: 0.08, fd: 110, alpha: 2.5 },
+      beats: { gain: 0.38, fbeat: 55, df: 0.25 },
+      dist: { gain: 0.28, fd: 55, alpha: 0.9 },
     },
     reaction: { feed: 0.032, kill: 0.058, speed: 18 },
     fieldVariation: { feedVarAmount: 0.014, feedVarScale: 3, feedVarWarp: 1.4, killVarAmount: 0.007, killVarScale: 4, killVarWarp: 1.2 },
@@ -519,14 +526,16 @@ export const PRESETS: readonly Preset[] = [
       { src: 1, target: 'fx', param: 'filterGain', depth: 0.12 },
       { src: 2, target: 'fx', param: 'chorusDepth', depth: 0.3 },
       { src: 2, target: 'fx', param: 'reverbMix', depth: 0.25 },
-      // S&H every ~35 s: the drone's inner motion, the growl, the echo tail.
+      // S&H every ~35 s: the drone's inner motion, the bass's breathing pace
+      // (0.05–0.45 Hz — a step in drive would bring the grit back), the
+      // echo tail.
       { src: 3, target: 'additive', param: 'move', depth: 0.08 },
-      { src: 3, target: 'dist', param: 'alpha', depth: 0.3 },
+      { src: 3, target: 'beats', param: 'df', depth: 0.01 },
       { src: 3, target: 'fx', param: 'delayFb', depth: 0.2 },
       { src: 0, target: 'palette', param: 'lightAngle', depth: 0.5 },
       { src: 1, target: 'reaction', param: 'feed', depth: 0.1 },
     ],
-    coupling: { brightToShift: 0.6, loudToGloss: 0.5, onsetToLight: 0.3, loudToPulse: 0.9, onsetToFlash: 0.3, onsetToSeed: 0.4, spectrumToTint: 0.8 },
+    coupling: { brightToShift: 0.6, loudToGloss: 0.5, onsetToLight: 0.3, loudToPulse: 0.7, onsetToFlash: 0.3, onsetToSeed: 0.4, spectrumToTint: 0.8 },
   }),
 ];
 
