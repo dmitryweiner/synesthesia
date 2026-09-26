@@ -173,7 +173,7 @@ export const FORMULAS: readonly FormulaDef[] = [
     sliders: [
       { k: 'gain', name: 'Gain', min: 0, max: 1, step: 0.001, value: 0.3 },
       { k: 'tanSa', name: 'Low Sa (Hz)', min: 30, max: 220, step: 0.1, value: 55, exp: true },
-      { k: 'tanCycle', name: 'Cycle (s)', min: 2, max: 16, step: 0.1, value: 5, exp: true },
+      { k: 'tanCycle', name: 'Cycle (s)', min: 2, max: 40, step: 0.1, value: 5, exp: true },
       { k: 'tanJawari', name: 'Jawari', min: 0, max: 1, step: 0.01, value: 0.5 },
       { k: 'tanSustain', name: 'Sustain (s)', min: 2, max: 30, step: 0.1, value: 16, exp: true },
       { k: 'tanBright', name: 'Pluck brightness', min: 0, max: 1, step: 0.01, value: 0.45 },

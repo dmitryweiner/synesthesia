@@ -556,6 +556,19 @@ them as 1-…).
 - *Picture metrics* over 3 minutes: both keep changing, the tanpura's
   cells hold ~0.42 coverage, *Candle glaze* ~0.66.
 
+27. **The user's verdict on the second versions (2026-09-26).** *Candle
+    glaze*: "perfect, keep it unchanged". *Tanpura halo*: "I like it, it
+    came out well", with three more steps: plucks **half as often again**
+    (the cycle 14 → 28 s, so the `tanCycle` range grows from 2–16 to
+    2–40 s), the tanpura itself **~25% quieter** (gain 1 → 0.75), and the
+    bowls **a little more forward** (gain 0.3 → 0.4). The strings now
+    sustain 30 s. Measured: 7 onset hits per minute, dropout 4.2 dB,
+    roughness 0.07, the picture still changing after 5 minutes (coverage
+    0.43). Fractality fell to 0.33 (loudness β 2.27): with a pluck every
+    ~7 s the slow layers set the loudness. The user asked for exactly that,
+    so the score is not a target here (*Molten Polivoks* was liked at 0.40).
+    WAV: `shots/tanpura-halo/4-v3-sparser-bowls-forward.wav`.
+
 ## Architecture
 
 ```
