@@ -370,6 +370,72 @@ can refuse a save were both removed instead of guessing:
 17. **PLAN-IMPROVEMENTS.md waits for the next session** — proposals only,
     nothing from it is implemented yet.
 
+## Decisions on PLAN-IMPROVEMENTS.md (agreed with the user, 2026-09-26)
+
+Went through the proposals one by one. **Taken up:** A1, A2, A4, A5, B1,
+B2, B8, B9 (below). **Deferred**, they stay in PLAN-IMPROVEMENTS.md: A3
+harmonic snap, A6 a non-repeating `additive`, A7 stereo, B3 long-form
+check, B4 LUFS leveling, B5 before/after diff, B6 character-aware scout,
+B7 real preferences. **Rejected:** A8.
+
+18. **A pink (1/f) LFO shape, and a new preset built on it.** A sixth
+    shape, `pink`: five octaves of smooth value noise at `rate·2^j`, equal
+    amplitude per octave (Voss–McCartney), cosine-interpolated so it glides,
+    hashed from the LFO phase like S&H so sound and picture stay in sync.
+    Appended after the existing shapes, so stored choice indices keep their
+    meaning. The prototype raised fractality where a sound was too smooth
+    (*Fractal garden* 0.84 → 0.96, *Aurora* 0.74 → 0.94, *Molten Polivoks*
+    0.53 → 0.66) and hurt where it was already restless (*Whale coral*
+    0.63 → 0.41: its pitch drift became jitter). So it is **an extra shape,
+    not a replacement: no existing preset changes.** Instead a new preset is
+    built around it once the shape exists. The prototype's hard clamp
+    (`sum/5·2.2`) is replaced by a soft limit.
+19. **Routes aimed at one parameter add up.** The offsets sum in each
+    route's own space (octaves for `exp`, linear otherwise) and the result is
+    clamped once; today the last route silently wins. No preset targets a
+    parameter twice, so no built-in sound changes. *Overtone steppe* is
+    **not** given a glide-plus-leaps whistle: its top was rated "5+", and
+    without A3's harmonic snap the leaps of a Q 30 filter would often land
+    between harmonics, where the whistle vanishes.
+20. **Tanpura and shimmer, and a second new preset.** The tanpura is a new
+    formula: four Karplus–Strong strings on the grid (Pa–Sa–Sa–Sa: 3/2, 2,
+    2, 1) plucked in a slow cycle, with the *jawari* buzz that blooms after
+    each pluck. It's a drone with gentle, regular attacks, so the picture
+    pulses with the plucks (drones fire 1–2 onset hits per 30 s today;
+    target 4–8, dropout still ≤ 6 dB). Shimmer is **a delay parameter**
+    (`delayShimmer`, 0..1): an octave-up pitch shifter inside the echo loop.
+    At 0 it is the plain echo, so every existing point sounds exactly as
+    before. It gets a limiter inside the loop and a test that the peak
+    stays bounded over 5 minutes. The preset "tanpura + shimmer" is
+    **separate from the pink-LFO preset**: two new presets, one idea each
+    (the new-preset skill's rule). The tanpura preset may still use pink
+    LFOs where they help.
+21. **The reverb room comes from a fixed seed, everywhere.** The impulse
+    is seeded noise in the app and in the analysis, so the room depends
+    only on the reverb parameters: a point sounds the same on every device
+    and through every link, and A/B renders compare in the same room (a
+    random room moved *Overtone steppe*'s score across 0.82–0.96). The
+    analysis can average over several seeded rooms. Rejected: a seed per
+    point (every 👍 would rebuild the impulse) and seeding only the
+    analysis. With seeded renders, the open "two whole runs at 0.70" issue
+    (PLAN-IMPROVEMENTS B1) is rerun: it either reproduces, and is a real
+    render bug to find, or it doesn't.
+22. **Analysis tools: a spectrogram PNG, picture metrics, `?paused=1`.**
+    `analyze.mjs --png` writes a log-frequency waterfall and the loudness
+    curve for every render, so an agent can *see* what it can't hear.
+    Picture metrics (coverage, edge density, frame-to-frame change over
+    minutes) are **a tool that prints numbers per preset**. Whether any of
+    them becomes a guarding test is decided later, from real numbers.
+    `?paused=1` stops the app's frame loop for analysis, which frees the ~2
+    cores the GPU process takes, so renders can run in parallel.
+23. **A8 "tides" is rejected.** Decision 1 stands: nothing moves the point
+    without user input. Slow LFOs (down to 0.003 Hz, a ~5.5-minute lap)
+    already let single parameters go somewhere and come back while the
+    point stays put.
+24. **B7 (logging real 👍/👎 and listening time) is deferred.** It needs a
+    consent line, a storage design, and enough users for the data to mean
+    anything.
+
 ## Architecture
 
 ```

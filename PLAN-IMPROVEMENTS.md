@@ -3,8 +3,12 @@
 Ideas collected while building *Overtone steppe* (2026-09-25): new sound
 mechanics in the style the project already has (drone / ambient), and the
 measurements we are missing. **Nothing here is agreed.** An item that gets
-agreed moves to PLAN.md "Decisions" with a number and a date. The user
-chose to take these up in the next session (PLAN.md #17).
+agreed moves to PLAN.md "Decisions" with a number and a date.
+
+*Reviewed with the user on 2026-09-26* (PLAN.md #18–24): A1, A2, A4, A5,
+B1, B2, B8 and B9 were agreed and moved to PLAN.md; A8 was rejected. What is
+left here was **deferred**, not rejected. The removed items' full text,
+with the pink-LFO prototype's per-preset table, is in git history.
 
 Each item says what it is, why (with a number where one was measured), what
 it costs, what could go wrong, and how we would know it worked.
@@ -31,56 +35,7 @@ LFOs at mutually irrational rates). Fractality alone does not describe it:
 
 ## A. Sound generation
 
-Ordered by value for effort.
-
-### A1. A pink (1/f) LFO shape — *prototyped and measured*
-
-A sixth LFO shape whose fluctuations are 1/f by construction: 5 octaves of
-smooth value noise at `rate·2^j`, equal amplitude per octave
-(Voss–McCartney), cosine-interpolated so it glides. Like S&H it is a pure
-function of the LFO phase (hashed), so sound and picture, which share the
-LFO clock, stay in sync.
-
-Why: people like 1/f fluctuations (Voss & Clarke), and the fractality score
-rewards exactly that. Today 1/f has to *emerge* from sums of sines and from
-chaotic formulas. Measured on a prototype (every sine/triangle LFO of a
-preset replaced by pink at the same rate, same run, 2 renders each):
-
-| preset | sine/triangle | pink | envβ | cenβ |
-|---|---|---|---|---|
-| Fractal garden | 0.84 | **0.96** | 1.43 → 0.90 | 1.16 → 0.85 |
-| Aurora | 0.74 | **0.94** | 0.92 → 0.77 | 1.69 → 1.11 |
-| Molten Polivoks | 0.53 | **0.66** | 1.56 → 0.98 | 1.69 → 1.77 |
-| Space breccia | 0.65 | 0.71 | 0.88 → 0.73 | 1.94 → 1.66 |
-| Overtone steppe | 0.71 | 0.83 | 1.58 → 1.42 | 1.33 → 1.20 |
-| Loom & copper | 0.86 | 0.87 | | |
-| Silver maze | 0.98 | 0.98 | | |
-| Whale coral | 0.63 | **0.41** | 0.46 → 0.23 | 1.49 → 1.83 |
-
-Pink helps where a sound is too smooth (β 1.4–1.9) and hurts where it is
-already restless (*Whale coral*: its pitch drift becomes jitter). So it
-should be **an extra shape, not a replacement**: evolution and the scout
-will pick it where it fits.
-
-Cost: small. `mod.ts` (≈20 lines), the worklet's and schema's shape sets,
-and `LFO_SHAPES` in genes.ts. Append the shape at the end so existing choice
-indices stay the same. Share links store AppState, so they survive.
-Risk: the prototype normalizes with a clamp (`sum/5·2.2`), which flattens
-rare peaks. Replace that with a soft limit before shipping.
-
-### A2. Routes on the same parameter add up — *found in code*
-
-`effectiveParams` (src/dsp/mod.ts) recomputes each route from the *base*,
-so when two routes aim at one parameter the last one silently wins. Adding
-the offsets (in the route's own space: octaves for `exp`, linear otherwise)
-and clamping once would make a slow contour **plus** S&H jumps possible:
-exactly what *Overtone steppe*'s whistle wanted (a glide that sometimes
-leaps to another overtone, and never repeats).
-
-Changes no existing sound: no preset targets a parameter twice (0 of 13),
-nor did any point after 260 👍/👎 steps. Random points do in 4 of 200,
-and there one route is dead today. Cost: a few lines plus tests (mod.test,
-modrouting for FX).
+Ordered by value for effort. (Numbering kept from the first version.)
 
 ### A3. "Stay on the grid": harmonic snap for pitch
 
@@ -91,29 +46,9 @@ as a glide. Why: the family keeps every voice on one grid (harmonicity
 mutation of `fm.fc` / `quasi.fq` / `logistic.base` drifts off it, and
 inharmonic partials rub against a drone. formula-synth's *Silver lace*
 comment records trying a Risset bell for that reason and dropping it. For
-the whistle, S&H would jump exactly from overtone to overtone.
+the whistle, S&H would jump exactly from overtone to overtone (with routes
+adding up, PLAN #19, on top of the glide).
 Measure: `harm` and `rough` of 👍/👎 proposals before and after.
-
-### A4. Tanpura: a drone that breathes in plucks
-
-A generator of four Karplus–Strong strings on the grid (Pa–Sa–Sa–Sa:
-3/2, 2, 2, 1), plucked in a slow cycle, with *jawari*: the soft nonlinear
-bridge buzz that blooms after each pluck. Why: drones fire 1–2 onset hits
-per 30 s (`--onsets`: family 1–2, *Overtone steppe* 1–2), so the picture's
-seeds and ripples (PLAN #8) almost never happen on the presets people like
-most. A tanpura *is* a drone with gentle, regular attacks, so the picture
-would pulse with the plucks and the sound would stay continuous.
-`karplus` already exists; the new parts are the cycle and the buzz.
-Target: 4–8 hits / 30 s, dropout still ≤ 6 dB.
-
-### A5. Shimmer: an octave-up echo
-
-A +12-semitone pitch shifter (two overlapping grain windows) in the delay's
-feedback loop: each echo rises an octave and blooms into a halo above the
-drone. It is the signature ambient sound (Eno/Lanois) and fits every
-family preset. Cost: a worklet FX stage inside the delay loop. Risk: CPU and
-runaway build-up. It needs a limiter inside the loop, and a test that the
-peak stays bounded over 5 minutes.
 
 ### A6. A drone whose inner life never repeats
 
@@ -121,7 +56,8 @@ peak stays bounded over 5 minutes.
 aₖ = sin(φ + k)/k, so the whole inner pattern repeats **exactly** every
 1/`move` seconds (20 s at *Overtone steppe*'s 0.05 Hz). A variant, a new
 formula or a `spread` parameter, would give each partial its own slow drift
-(incommensurate rates like `move·√k`, or A1's pink per partial) plus a tiny
+(incommensurate rates like `move·√k`, or the pink LFO of PLAN #18 per
+partial) plus a tiny
 per-partial detune (±0.1–0.3 Hz), so the partials beat slowly like a choir.
 That matches what the family is built on (LFOs at unrelated rates), applied
 to the drone's core. Measure with B3.
@@ -134,48 +70,7 @@ is stereo. The cheapest big win for ambient on headphones: `beats` as
 head), and a slow autopan of the ornament voices. Risk: phones often play
 mono; check mono compatibility (L+R must not cancel).
 
-### A8. Tides: a slow return trip *(conflicts with PLAN #1)*
-
-A macro morph over 3–8 minutes between the point and one nearby mutant, so
-the sound goes somewhere and comes back: form, not just texture. PLAN
-decision 1 says nothing changes without user input, so this could only be
-an explicit per-point switch. Your call.
-
----
-
 ## B. Evaluation: what we're missing
-
-### B1. Deterministic renders (seeded reverb) — *measured, and one open issue*
-
-*Needed again the next day:* fixing *Overtone steppe*'s bass, the random
-room moved the bass metrics more than the variants did (roughness 0.046
-vs 0.034 for the same point in two runs). Only a throwaway snapshot with a
-seeded impulse — the same three rooms for every variant — made the
-comparison readable.
-
-The reverb impulse is `Math.random()` noise, built fresh for every render,
-and it moves the score. *Overtone steppe* over 14 renders with
-different seeded rooms: **0.82–0.96**. A point sitting on the steep side
-of the preference curve moved 0.28 ↔ 0.52. Seeding the impulse from the
-point (or a fixed seed offline) makes a render repeatable to ±1 LSB
-(checked: −90 dB difference between two runs). Then A/B comparisons become
-paired (same room), and the scout's ranking stops depending on the room.
-
-**Open issue:** two whole runs rendered *Overtone steppe* at 0.70 ± 0.00
-(dropout 7–8.6 dB), while every other run gave 0.83–0.96. It isn't the
-code (identical modules served), the server, CPU load (0.91 under 8 busy
-processes) or a lost reverb (reverb off gives 0.87). With seeded renders a
-rerun either reproduces it, and then it's a real render bug to find, or it
-doesn't. Until then: compare points only within one run.
-
-### B2. A spectrogram picture per render (`--png`)
-
-A log-frequency waterfall PNG (plus the loudness curve) for every rendered
-point. formula-synth's presets were tuned by looking at the waterfall, and
-an agent can read images: it would **see** what it can't hear. This
-session spent about an hour building, and then debunking, a numeric
-"whistle lead" metric that one picture (a bright line stepping across the
-harmonics) would have settled. Cheap: a canvas in the page and `toDataURL`.
 
 ### B3. Long-form check (`--long 600`)
 
@@ -195,8 +90,8 @@ scout's "more than 6 dB quieter" penalty would then be perceptual too.
 ### B5. Before/after diff for DSP changes (`--compare base.json`)
 
 Per preset, flag the metrics that moved beyond their render spread. Today a
-refactor of `engine.ts` could silently change every preset's sound. Needs
-B1 to be meaningful.
+refactor of `engine.ts` could silently change every preset's sound. The
+seeded reverb (PLAN #21) is what makes it meaningful.
 
 ### B6. A character-aware scout — *measured: not needed yet*
 
@@ -223,16 +118,3 @@ point is listened to. Logged anonymously to the existing Worker/D1, that
 would let us fit what people prefer and recalibrate `fractalScore`.
 Needs your decision: privacy, a consent line in the UI, storage.
 
-### B8. The picture has no measurement at all
-
-Coverage, edge density and the frame-to-frame change of the simulation
-state over 5 minutes would catch "the pattern died" (chromaflux's advection
-problem) and "the coupling does nothing". *Overtone steppe*'s picture was
-checked by screenshots at 2 and 5 minutes: slow, and by eye.
-
-### B9. Analysis still burns two cores on the app's own loop
-
-`analyze.mjs` now opens the app at `?res=64&scale=64` (it used to paint a
-full canvas, and a 60 s render went from ~20 s to 60–190 s). The loop
-still runs at full frame rate, and the GPU process still takes ~2 cores.
-A `?paused=1` for the frame loop would free them for parallel renders.
