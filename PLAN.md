@@ -568,6 +568,12 @@ them as 1-…).
     ~7 s the slow layers set the loudness. The user asked for exactly that,
     so the score is not a target here (*Molten Polivoks* was liked at 0.40).
     WAV: `shots/tanpura-halo/4-v3-sparser-bowls-forward.wav`.
+    After listening to it: the plucks **another 25% quieter** (tanpura
+    gain 0.75 → 0.56) and the sea **25% louder** (ocean gain 0.25 → 0.313).
+    Dropout 4.1 dB, level −25 dB. The detector now hears only 2–4 of the
+    ~8 plucks a minute (they rarely stand out over the bowl and the sea),
+    so the picture seeds on few of them and evolves mostly on its own.
+    WAV: `shots/tanpura-halo/5-v4-softer-plucks-more-sea.wav`.
 
 ## Architecture
 

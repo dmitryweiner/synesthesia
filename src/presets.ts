@@ -603,8 +603,9 @@ export const PRESETS: readonly Preset[] = [
     // A drone that breathes in plucks (PLAN.md #20, #25): four tanpura
     // strings Pa–Sa–Sa–Sa on a 65 Hz Sa, plucked in an unhurried 28 s cycle
     // (the user: "natural like a sitar and new, electronic at once" — and
-    // lyrical: twice they asked for half as many plucks, and for the
-    // strings a quarter quieter under the bowls, PLAN.md #27), with the jawari
+    // lyrical: twice they asked for half as many plucks, twice for the
+    // strings a quarter quieter, the bowls and the sea forward, PLAN.md
+    // #27), with the jawari
     // buzz (a pink LFO lets it come and go), a round 65 Hz sine, a singing
     // bowl an octave up whose modes beat slowly (a triangle LFO rubs it
     // louder and softer), the sea far behind, and an echo that climbs an
@@ -612,11 +613,12 @@ export const PRESETS: readonly Preset[] = [
     // the picture's gloss and light together.
     // Picture: Verdigris cells that divide (Pearson η, F 0.034, k 0.063);
     // every pluck the onset detector hears seeds a new cell and a ripple.
-    // Measured (60 s, two seeded rooms): dropout 4.2 dB, roughness 0.07
-    // (the smoothest of all), 7 onset hits per minute (23 per 30 s at the
-    // first 7 s cycle). Shimmer on vs off (first draft): +4 dB at 4–8 kHz,
-    // +12.5 dB above 8 kHz, within 0.2 dB below 2 kHz. Fractality 0.33 and
-    // loudness β 2.27 (distance 1.48, envβ +3 sd): with a pluck every ~7 s
+    // Measured (60 s, two seeded rooms): dropout 4.1 dB, roughness 0.09,
+    // 2–4 onset hits per minute: the quieter plucks rarely stand out over
+    // the bowl and the sea, so the picture seeds on few of them (23 per
+    // 30 s at the first, loud 7 s cycle). Shimmer on vs off (first draft): +4 dB at 4–8 kHz,
+    // +12.5 dB above 8 kHz, within 0.2 dB below 2 kHz. Fractality 0.24 and
+    // loudness β 2.27 (envβ +3 sd from the family): with a pluck every ~7 s
     // the slow bowl, sea and fat sine set the loudness contour. Lyrical on
     // the user's request, not a score to chase.
     masterGain: 0.68,
@@ -628,10 +630,10 @@ export const PRESETS: readonly Preset[] = [
       reverbOn: true, reverbDecay: 7, reverbMix: 0.45,
     },
     formulas: {
-      tanpura: { gain: 0.75, tanSa: 65, tanCycle: 28, tanJawari: 0.6, tanSustain: 30, tanBright: 0.3 },
+      tanpura: { gain: 0.56, tanSa: 65, tanCycle: 28, tanJawari: 0.6, tanSustain: 30, tanBright: 0.3 },
       dist: { gain: 0.42, fd: 65, alpha: 0.9 },
       bowl: { gain: 0.4, bowlF: 130, bowlBeat: 0.3, bowlBright: 0.35 },
-      ocean: { gain: 0.25, oceanRate: 0.07, oceanCut: 600, oceanDepth: 0.8 },
+      ocean: { gain: 0.313, oceanRate: 0.07, oceanCut: 600, oceanDepth: 0.8 },
     },
     reaction: { feed: 0.034, kill: 0.063, speed: 14 },
     flow: { curlStrength: 0.006, curlScale: 3, advectAmount: 0.2, evolveRate: 0.006 },
