@@ -18,7 +18,8 @@ npm run analyze -- --configs 30@22050,24@8000  # does a cheap render rank like a
 npm run analyze -- --preset 0 --mutants 8      # what 👍/👎 would propose, scored
 npm run analyze -- --random 12                 # presets vs random points
 npm run analyze -- --preset 0 --wav shots/wav  # WAVs to listen to / re-analyze
-npm run analyze -- --preset 12 --repeat 4      # mean ± sd over renders (reverb = fresh noise)
+npm run analyze -- --preset 12 --repeat 4      # mean ± sd over 4 seeded rooms, paired across points
+npm run analyze -- --preset 12 --secs 60 --png shots/png  # a waterfall + loudness PNG per render: LOOK at it
 npm run analyze -- --character --ref 0,3,5,6,8 # what kind of sound + distance to the liked family
 npx vitest run tests/continuity.test.ts tests/onsets.test.ts
 ```
@@ -26,7 +27,11 @@ npx vitest run tests/continuity.test.ts tests/onsets.test.ts
 `analyze.mjs` renders the **real graph** (worklet generators + FX + LFOs)
 through an `OfflineAudioContext` in headless Chromium, so what it measures is
 what users hear. It starts its own Vite dev server (the page imports
-`/src/*.ts`) and stops it on exit.
+`/src/*.ts`) and stops it on exit; its page runs with `?paused=1`, so the
+app's own frame loop doesn't eat the CPU (~1 core instead of ~6.8 while
+rendering). A render is **repeatable**: the reverb room and the noise
+formulas are seeded (`src/audio/seed.ts`, PLAN.md #21), seed 1 is what the
+app plays, and `--repeat N` renders seeds 1..N.
 
 ## What the numbers mean
 
@@ -40,7 +45,7 @@ what users hear. It starts its own Vite dev server (the page imports
 | swell range | ±0.3…0.9 on drones | drives the exposure pulse |
 | clicks at a switch | 0 | `analyze.mjs --switch`; attacks inside struck presets are *not* faults |
 | roughness ratio (continuity test) | < 1.3 | modulated vs unmodulated HF energy; >2 means phase jumps |
-| score sd (`--repeat`) | ≤ 0.03 on liked presets | larger = the point sits on a preference cliff (envβ≈2); average before comparing |
+| score sd (`--repeat`) | ≤ 0.03 on liked presets | spread over rooms (seeds). Larger = the point sits on a preference cliff (envβ≈2); average before comparing. *Overtone steppe*: 0.97 / 0.95 / 0.84 / 0.98 on seeds 1–4 |
 | `drop` (`--character`) | drones 3–6 dB; drips/bells 8–12 | how deep the sound falls out; the liked family never breaks |
 | `low` | liked family 0.65–0.96 | energy share < 200 Hz — "fat" |
 | `harm` | liked family 0.5–0.9 | one harmonic grid; inharmonic bells rub against a drone |
@@ -49,7 +54,7 @@ what users hear. It starts its own Vite dev server (the page imports
 ## Designing or retuning a preset
 
 Use the `new-preset` skill: the family profile, variants rendered side by
-side, same-room comparisons (seeded-snapshot.mjs, bands.mjs), the picture
+side, same-room comparisons (snapshot.mjs, --repeat, bands.mjs), the picture
 over minutes, the final checks, and listening WAVs for the user.
 
 ## Tuning a threshold (the method that worked)

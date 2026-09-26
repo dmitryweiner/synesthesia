@@ -36,7 +36,13 @@ npm run analyze   # fractality of the real sound (see "Sound analysis" below);
                   # --render --passes: ms per PASS — a 1-px readPixels is a
                   #   real barrier where gl.finish() is not, and timing step()
                   #   at speed 1 vs 11 splits one react substep from the rest
-                  # --repeat N: mean ± sd over N renders of each point;
+                  # --repeat N: mean ± sd over N seeded rooms (seeds 1..N,
+                  #   the same rooms for every point — renders are repeatable);
+                  # --png DIR: a log-frequency waterfall + loudness PNG per
+                  #   render — look at the sound;
+                  # --picture [--minutes 5 --every 30]: numbers for the
+                  #   PICTURE per preset (coverage, edges, change; flags a
+                  #   pattern that died or froze), read from the sim state;
                   # --character [--ref 0,3,5,6,8]: what KIND of sound
                   #   (dropout, swing, low end, harmonicity, roughness,
                   #   motion at 1 s / 10 s) and the distance to a group
@@ -74,7 +80,9 @@ every guess cost a round trip:
 | are the built-in presets actually "fractal"? | `analyze.mjs --random 12` | presets 0.79±0.14 vs random 0.55±0.31 |
 | why 0.57 fps on a 1080p board with no GPU? | `analyze.mjs --render --passes` | react×16 = 1406 ms of 1764 (80%), *not* the noise fields (120 ms, 7%) — a C cost model had said the opposite |
 | how much does the canvas cost on its own? | `--render --grid 64` (grid made negligible) | 262 ms at 1920×1031, 128 at 1280×671, 46 at 640×271 — it does not shrink with `?res=` |
-| is a 0.1 score difference between two points real? | `analyze.mjs --repeat 4` | the reverb impulse is fresh noise per render: liked presets move ±0.01–0.03, but a point with envβ≈2 (the steep side of the preference) read 0.28 and 0.52 on two renders. *Overtone steppe*: 0.82–0.96 over 14 renders with seeded rooms — yet two whole runs read 0.70±0.00 (not load, not the server, not a lost reverb; cause open, PLAN-IMPROVEMENTS.md) |
+| is a 0.1 score difference between two points real? | `analyze.mjs --repeat 4` | the room moves the score: liked presets ±0.01–0.03, a point with envβ≈2 (the steep side of the preference) read 0.28 and 0.52. Rooms are seeded now (PLAN.md #21): *Overtone steppe* 0.97 / 0.95 / 0.84 / 0.98 on seeds 1–4, identical in six whole runs — the old "two runs at 0.70±0.00" never recurred |
+| does shimmer change points that don't use it? | `--wav` of the 9 delay presets, shimmer node in the loop vs the old wiring | 4 bit-identical, 5 within 1 LSB of 16 bit (≤ −96 dBFS) |
+| what does the analysis page's own frame loop cost? | Chromium %CPU while rendering, `?paused=1` vs not | ~1.0 core vs ~6.8 cores; a 60 s render 17.5 s vs 20 s wall |
 | what do the presets people liked most have in common? | `analyze.mjs --character --ref 0,3,5,6,8` | a band that never breaks (dropout 4–6 dB vs 8–12 for drips/bells/wind), low end 0.65–0.96 of the energy (vs 0.0–0.2), one harmonic grid, slow change |
 | did the render changes actually help? | `--render` / `--render --passes`, base vs new snapshots, interleaved | same configuration 2.0×; default point 0.57 → 10.8 fps |
 
@@ -92,6 +100,11 @@ Corollaries:
 - **Render whole blocks.** `SR * seconds` is usually not a multiple of 128;
   a truncated last block drops samples between two `fill()` runs and fakes a
   discontinuity (a "click" that isn't there).
+- **The click detector can't tell a pluck from a click.** It is
+  median-relative: a plucked string over a dark sustain, or the jawari's
+  buzz blooming after a pluck, reads as a burst of "clicks". Look at the
+  `--png` waterfall instead: a real discontinuity is a full-band line that
+  reaches below the lowest fundamental.
 - **Median-relative detectors can't see per-frame damage.** `detectClicks`
   finds isolated clicks; an artifact that happens on *every* audio block
   lifts the median instead. Use a relative measure (HF roughness with vs
@@ -186,18 +199,26 @@ Corollaries:
 ## Module map
 
 ```
-src/dsp/generator.ts   21 formulas, per-sample, pure; block-rate LFO modulation
-                       overwrite-then-restore in fill(). EVERY oscillator
+src/dsp/generator.ts   22 formulas, per-sample, pure; block-rate LFO modulation
+                       overwrite-then-restore in fill(), each param once, all
+                       its routes added up. EVERY oscillator
                        accumulates phase (ph1..ph4, rissPhases): the ported
                        sin(2π·f·t) jumped phase by 2π·Δf·t on any frequency
                        change → harsh beating after minutes (user report,
                        PLAN.md "Bugs"). gliss: log-frequency state, restarts
                        after 4 octaves
-src/dsp/mod.ts         LFO (pure function of absolute time), effectiveParam(s).
+src/dsp/tanpura.ts     the tanpura formula: 4 KS strings Pa–Sa–Sa–Sa, a pluck
+                       cycle, jawari = a bridge-contact pulse per string
+src/dsp/shimmer.ts     OctaveShimmer: octave-up grains for the delay's feedback
+                       loop; amount 0 is a bit-exact pass-through
+src/dsp/mod.ts         LFO (pure function of absolute time; shapes append-only,
+                       6th = pink 1/f), modulatedParam: routes on one param ADD
+                       UP (octaves for exp), clamped once (PLAN.md #19).
                        ModRoute.target = 'fx' | formula id | visual card id —
                        the three namespaces never collide
 src/dsp/gate.ts, rng.ts  fade gate for disabled generators; mulberry32 + gaussian
-src/worklet/processors.ts  AudioWorklet wrapper (loaded via ?worker&url)
+src/worklet/processors.ts  AudioWorklet processors (loaded via ?worker&url):
+                       formula-generator (seeded rng) and shimmer
 src/audio/engine.ts    AudioEngine: build(ctx) works on any BaseAudioContext;
                        start() = live AudioContext, renderOffline() = same graph
                        in an OfflineAudioContext with FX modulation scheduled
@@ -219,6 +240,8 @@ src/audio/iosUnlock.ts the iOS Ring/Silent fix (PLAN.md bugs, 2026-09-23):
                        ../formula-synth
 src/audio/analyserSim.ts  pure AnalyserNode emulation (Blackman, smoothing, dB →
                        byte) — runs the live feature pipeline on offline audio
+src/audio/seed.ts      repeatable renders: the reverb room and every formula's
+                       noise stream come from RENDER_SEED (PLAN.md #21)
 src/audio/filters.ts, modrouting.ts  pure pieces of the engine (tested)
 src/schema/audio.ts    formula sliders (+ `exp` flag for octave mutation),
                        FxState, modulatable-FX allowlist/ranges/modules
@@ -273,13 +296,15 @@ src/analysis/          fft.ts (radix-2), fractal.ts (spectralSlope, higuchiFD,
                        boxCountDimension, analyzeSound, fractalScore),
                        character.ts (dropout, swing, low-end share,
                        harmonicity, Plomp–Levelt roughness, motion at 1/10 s),
-                       clicks.ts (median-relative HF click detector)
+                       clicks.ts (median-relative HF click detector),
+                       spectrogram.ts (log-frequency waterfall for --png),
+                       picture.ts (coverage/edges/change of the sim's V)
 src/coupling.ts        pure: features × card-coupling genes → card param offsets
                        (shift/lightAngle wrap, the rest clamp); COUPLING_LABELS
 src/visualFx.ts        pure: explicit couplings (PLAN.md #8) → DisplayFx
                        {exposure, flash, tint[3]}; RippleSet (≤4, 1.6 s).
                        main.ts: OnsetDetector hit → sim.inject() + ripple
-src/presets.ts         13 presets = formula-synth sound × chromaflux material,
+src/presets.ts         15 presets = formula-synth sound × chromaflux material,
                        with cross-domain LFO routes and coupling
 src/ui/details.ts      read-only "what is this point" panel (+ fractality);
                        renders into #detailsBody — the panel's own ✕ lives
@@ -288,8 +313,9 @@ src/ui/touch.ts        pure: pointer → canvas UV (Y flips) and the stamps to
                        fill a drag between two frames. A touch runs the same
                        inject()+ripple an onset does (PLAN.md #14) — chromaflux's
                        Brush card itself is still not ported (PLAN.md #2)
-src/ui/wakelock.ts     screen wake lock: taken on the first gesture, re-taken
-                       when the tab is visible again (phones dim otherwise)
+src/ui/wakelock.ts     ScreenAwake: wake lock taken on the first gesture, re-taken
+                       on visible/focus/pageshow/any touch; `sentinel.released`
+                       decides, never the (late) release event
 src/main.ts            wiring only: explorer → 2 s eased genome morph →
                        engines; shared LFO clock (audio.time when sound runs);
                        settle → last point saved + scout scheduled; a step
@@ -300,11 +326,13 @@ scripts/lib.mjs        startServer (fresh, free port, killed on exit), launchBro
                        SwiftShader), openApp (readiness), withRes
 scripts/smoke.mjs      invariants only, never pixels; --mobile, --res, --screenshot
 scripts/snap.mjs       one debug screenshot
-scripts/analyze.mjs    offline render in the page (imports /src/*.ts from the dev
-                       server) → metrics table; --mutants, --random, --configs
-                       (Spearman of cheap windows vs the first), --wav, --json,
-                       --repeat (mean ± sd), --character, --ref (distance to
-                       a group of presets)
+scripts/analyze.mjs    offline render in the page (?paused=1, imports /src/*.ts
+                       from the dev server) → metrics table; --mutants,
+                       --random, --configs (Spearman of cheap windows vs the
+                       first), --wav, --png, --json, --repeat (seeds 1..N),
+                       --character, --ref (distance to a group of presets),
+                       --picture (?probe=1 → window.synesthesiaProbe reads
+                       SimEngine.readState)
 ```
 
 ## Sound analysis — what the numbers mean
@@ -315,10 +343,10 @@ scripts/analyze.mjs    offline render in the page (imports /src/*.ts from the de
 dimension of the loudest 20% of a 64-band log-frequency spectrogram.
 `score` = (2·pref(envβ≈1) + 2·pref(cenβ≈1) + pref(box≈1.6)) / 5.
 
-The score is one render's: the reverb impulse is fresh noise each time, so
-compare points with `--repeat` when they differ by less than ~0.1, and
-compare them **in the same run** — a whole run has shifted by 0.2 for one
-point (0.70±0.00 vs 0.89±0.07), cause not found yet.
+The score is one room's: the reverb impulse is seeded noise
+(`src/audio/seed.ts`), so a render repeats exactly, but another room gives
+another score. Compare points with `--repeat` when they differ by less than
+~0.1: render k uses seed k for every point, so they compare as pairs.
 `--character` says what kind of sound it is (`src/analysis/character.ts`):
 `drop` (median − p5 of 400 ms loudness, dB — does the band break?), `swing`
 (p95 − p5), `low` (energy share < 200 Hz), `harm` (peak energy on one

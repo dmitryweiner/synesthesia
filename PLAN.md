@@ -340,6 +340,21 @@ can refuse a save were both removed instead of guessing:
   `visibilitychange` now resumes it, the same way ../formula-synth does.
   (`AudioEngine.resume()` already existed here — nothing had ever called it.)
 
+## Bugs found after user testing (2026-09-26)
+
+- **Phones dimmed again after a lock/unlock — fixed.** Reported: the
+  "keep the screen on" stopped working once the phone had been locked and
+  unlocked, and only a page reload brought it back. Two holes in
+  `src/ui/wakelock.ts`: (1) the browser marks the old lock `released` at
+  once but may fire its `release` event *after* the page is visible
+  again. The code trusted the event, still "held" the dead lock at that
+  moment, skipped the request and never retried. (2) A request refused
+  right after unlocking was swallowed, and the only gesture listener had
+  already fired once. Now `sentinel.released` decides, a late event from an
+  old lock can't clear a newer one, and every touch/key, `focus` and
+  `pageshow` retries whenever no lock is held (`tests/wakelock.test.ts`
+  replays the lock/unlock sequences).
+
 ## Decisions after user listening (agreed with the user, 2026-09-26)
 
 15. **Overtone steppe stays, with a rounder bass.** A 13th preset built on
@@ -435,6 +450,60 @@ B7 real preferences. **Rejected:** A8.
 24. **B7 (logging real 👍/👎 and listening time) is deferred.** It needs a
     consent line, a storage design, and enough users for the data to mean
     anything.
+
+### How #18–22 came out (2026-09-26)
+
+- *Pink LFO:* measured 1/f (−3 dB per octave) from rate/2 to 4·rate,
+  steeper above, where the top octave's smoothing takes over; a tanh soft
+  limit keeps the prototype's spread (sd 0.4–0.6) with round peaks.
+- *Adding routes* also fixed a real bug: the worklet saved and restored
+  each route's param in turn, so a param with two routes had an effective
+  value written back as its base on every block, and it drifted.
+- *Shimmer* sits in the loop delay → feedback gain → shimmer → delay. The
+  shifter's two sin²/cos² grains are a convex mix of past input, so the
+  loop stays bounded by its feedback alone; a low-pass before the shifter
+  makes each pass die out as it climbs. Measured: bounded over 5 minutes
+  at feedback 0.9 with no build-up. At 0, the nine delay presets render
+  bit-identical (4) or within 1 LSB of 16 bit (5) to the old wiring.
+- *Seeded renders* cover the noise formulas too (rain, ocean, velvet, …),
+  not only the room, so a noise preset repeats as well. Six whole runs of
+  *Overtone steppe* (60 s, seeds 1–4) gave identical per-seed scores,
+  0.97 / 0.95 / 0.84 / 0.98. **The "0.70 ± 0.00" runs did not recur**; if
+  a seed's score ever differs between runs, that is now a detectable
+  render bug. The room itself still moves a score by up to 0.14.
+- *`--png`* immediately showed something no metric had flagged: every
+  render starts with ~6 s of broadband reverb tail from the generators
+  switching on. Harmless, but the first seconds are not the sound.
+- *`?paused=1`:* while an analysis renders, Chromium takes ~1.0 core
+  instead of ~6.8, and a 60 s render finishes in 17.5 s instead of 20 s.
+  The user added (2026-09-26) that the app runs on other machines, so
+  render speed *on this dev box* is not worth optimizing further.
+- *Picture metrics* (`analyze.mjs --picture`): coverage, edges and change
+  of the simulation's V channel, read back through `?probe=1`. Over 2
+  minutes, *Overtone steppe*, *Whale coral* and both new presets all grew
+  (the tanpura's cells 0.16 → 0.41 coverage) and kept changing.
+- *The tanpura* came out differently from the proposal in two places:
+  - the jawari is a contact pulse per string (a smoothed step at the top
+    of each swing, scaled by the swing, blooming in ~120 ms after a
+    pluck). The textbook model — shortening the loop with the
+    displacement — measured *darker*, not brighter;
+  - the pluck is three periods of two-pole low-passed noise, a finger
+    rather than a pick. A one-period burst was a full-band hit on every
+    pluck.
+- **Two presets, waiting for the user's ears** (WAV pairs in
+  `shots/candle-glaze/`, `shots/tanpura-halo/`):
+  - *Candle glaze* (13): all four LFOs pink; a resonant low-pass "flame"
+    over a 49 Hz grid, a 0.34 Hz pink flicker on the FM lace, Glaze worms
+    drifting up. Fractality 0.87 ± 0.08 against 0.84 on sine LFOs;
+    distance 0.94 to the liked family.
+  - *Tanpura halo* (14): tanpura on a 65 Hz Sa with a round sine under it
+    and shimmer; dividing Verdigris cells seeded by the plucks. Distance
+    0.91; shimmer adds +4 dB at 4–8 kHz and +12.5 dB above 8 kHz and
+    leaves everything below 2 kHz alone. **Onsets: 20–23 per 30 s, not
+    the 4–8 the plan aimed at**: the detector hears nearly every pluck and
+    some echoes, so the picture seeds on each pluck (the flash is turned
+    down to 0.25 for that). Fractality 0.67, because the fat bass smooths
+    the loudness contour (0.87 with a thinner bass) — bass kept.
 
 ## Architecture
 

@@ -88,6 +88,11 @@ export class PingPongTarget {
     return this.frontIsA ? this.texA : this.texB;
   }
 
+  /** The framebuffer holding the current state (for a readback). */
+  get readFramebuffer(): WebGLFramebuffer {
+    return this.frontIsA ? this.fboA : this.fboB;
+  }
+
   get writeTarget(): RenderTarget {
     return { fbo: this.frontIsA ? this.fboB : this.fboA, width: this.width, height: this.height };
   }

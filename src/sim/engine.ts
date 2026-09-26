@@ -270,6 +270,23 @@ export class SimEngine {
     gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, this.syncPixel);
   }
 
+  /**
+   * The state's V channel (the "ink"), row by row — for analyze.mjs
+   * --picture (PLAN.md #22). A full-grid readback that stalls the pipeline:
+   * never call it from the frame loop.
+   */
+  readState(): { width: number; height: number; v: Float32Array } {
+    const gl = this.gl;
+    const { width, height } = this.state;
+    const rgba = new Float32Array(width * height * 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.state.readFramebuffer);
+    gl.readPixels(0, 0, width, height, gl.RGBA, gl.FLOAT, rgba);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    const v = new Float32Array(width * height);
+    for (let i = 0; i < v.length; i++) v[i] = rgba[i * 4 + 1];
+    return { width, height, v };
+  }
+
   /** Changes the simulation grid size, preserving the current pattern (blit). */
   setGrid(width: number, height: number): void {
     if (width === this.state.width && height === this.state.height) return;

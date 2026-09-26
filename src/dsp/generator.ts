@@ -11,16 +11,19 @@
 import type { Rng } from './rng';
 import type { LfoDef, ModRoute, ParamRanges } from './mod';
 import { modulatedParam } from './mod';
+import { Tanpura } from './tanpura';
 
 export type FormulaId =
   | 'fm' | 'logistic' | 'gliss' | 'additive' | 'pm' | 'beats' | 'dist' | 'quasi'
   | 'lorenz' | 'karplus' | 'noiselp' | 'pinknoise' | 'brownnoise' | 'velvetnoise'
-  | 'rossler' | 'shepard' | 'bytebeat' | 'bell' | 'ocean' | 'risset' | 'rain';
+  | 'rossler' | 'shepard' | 'bytebeat' | 'bell' | 'ocean' | 'risset' | 'rain'
+  | 'tanpura';
 
 export const FORMULA_IDS: readonly FormulaId[] = [
   'fm', 'logistic', 'gliss', 'additive', 'pm', 'beats', 'dist', 'quasi',
   'lorenz', 'karplus', 'noiselp', 'pinknoise', 'brownnoise', 'velvetnoise',
   'rossler', 'shepard', 'bytebeat', 'bell', 'ocean', 'risset', 'rain',
+  'tanpura',
 ];
 
 const FORMULA_ID_SET: ReadonlySet<string> = new Set(FORMULA_IDS);
@@ -57,6 +60,7 @@ export const DEFAULT_PARAMS: Readonly<Params> = {
   oceanRate: 0.12, oceanCut: 600, oceanDepth: 0.7,
   rissF0: 480, rissDecay: 5, rissPeriod: 6,
   rainDensity: 4, rainPitch: 900, rainBed: 0.15,
+  tanSa: 55, tanCycle: 5, tanJawari: 0.5, tanSustain: 16, tanBright: 0.45,
 };
 
 // Classic bytebeat recipes: integer t, result taken mod 256.
@@ -137,6 +141,8 @@ export class FormulaGenerator {
   private rainCounter = 0;
   private rainNext = 0;
 
+  private tanpura: Tanpura | null = null; // src/dsp/tanpura.ts, only for 'tanpura'
+
   // Block-rate modulation. modT is absolute LFO time; NOT reset by reset()
   // (reset restarts the sound, not the modulation).
   private modT = 0;
@@ -152,6 +158,7 @@ export class FormulaGenerator {
     this.rng = rng;
     this.p = { ...DEFAULT_PARAMS, ...(params ?? {}) };
     this.initKS(true);
+    if (formula === 'tanpura') this.tanpura = new Tanpura(sampleRate, rng);
   }
 
   set(params: Params): void {
@@ -188,6 +195,7 @@ export class FormulaGenerator {
     this.rainLp = 0;
     this.dropT = 1e9; this.dropPhase = 0; this.dropFreq = 0; this.dropAmp = 0;
     this.rainCounter = 0; this.rainNext = 0;
+    this.tanpura?.reset();
   }
 
   private initKS(force: boolean): void {
@@ -505,6 +513,9 @@ export class FormulaGenerator {
           x = drop * 0.9 + this.rainLp * bed * 0.6;
           break;
         }
+        case 'tanpura':
+          x = this.tanpura ? this.tanpura.next(p.tanSa, p.tanCycle, p.tanJawari, p.tanSustain, p.tanBright) : 0;
+          break;
       }
 
       out[i] = x * (p.gain ?? 0.2);

@@ -39,8 +39,12 @@ Take what the family has, add **one** move it doesn't make yet, and write
 it into the preset's comment. Already used: comb-filter moiré (Loom,
 Fractal garden), a peaking glow (Silver maze), a resonant LP sweep
 (Polivoks), Shepard grids, logistic bifurcations, FM fans, a Q-30 overtone
-whistle (Overtone steppe). Candidate new moves are in PLAN-IMPROVEMENTS.md,
-part A. Some need new mechanics: agree those with the user first.
+whistle (Overtone steppe). Mechanics added on 2026-09-26 and not yet
+used by a built-in: the **pink** LFO shape (1/f wandering, PLAN.md #18),
+the **tanpura** formula (plucked Pa–Sa–Sa–Sa strings with jawari buzz) and
+**delay shimmer** (every echo an octave up), PLAN.md #20. More candidate
+moves are in PLAN-IMPROVEMENTS.md, part A. Some need new mechanics: agree
+those with the user first.
 
 The picture carries the same idea through a **shared LFO**: the one that
 moves the sound's main gesture also drives a visual parameter (Feed,
@@ -52,9 +56,10 @@ and Verdigris came out muddy under the warm tint that bass-heavy sounds get
 
 Hard limits (tests/presets.test.ts): ≤ 5 formulas, ≤ 12 routes, every value
 inside its slider range, the explicit couplings sum ≥ 1.2, and at least
-one visual route or coupling. Two routes on the **same parameter do not
-add up**: the last one wins (PLAN-IMPROVEMENTS A2). S&H should only step
-things whose step can't be heard. FX parameters are smoothed, but a step in
+one visual route or coupling. Two routes on the **same parameter add
+up** (PLAN.md #19; octaves for exp routes, clamped once), so a slow
+contour plus rare S&H leaps is possible. S&H should only step things whose
+step can't be heard. FX parameters are smoothed, but a step in
 saturation drive is audible grit.
 
 ## 2. Draft and variants, rendered side by side
@@ -77,12 +82,21 @@ export const VARIANTS: readonly Preset[] = [
 ```
 
 ```bash
-node scripts/analyze.mjs --preset 12,13,14 --secs 60 --character --repeat 2 --wav shots/wav
+node scripts/analyze.mjs --preset 12,13,14 --secs 60 --character --repeat 2 --wav shots/wav --png shots/png
 ```
 
-- **Compare only within one run.** The reverb is a fresh random room per
-  render (±0.05, up to ±0.12 near a preference cliff). And whole runs have
-  shifted by ~0.2 for one point, cause still open.
+- **Renders repeat exactly** (PLAN.md #21): the reverb room and the noise
+  formulas are seeded, so one seed renders the same samples in every run,
+  and `--repeat N` renders seeds 1..N, the same N rooms for every point.
+  The room still moves the score (±0.05, up to 0.14 for *Overtone steppe*
+  between seeds), so compare with `--repeat` ≥ 2. The old "a whole run
+  shifted by 0.2" did not recur in six seeded runs; if a seed's score ever
+  differs between runs, that is a render bug.
+- **Look at it:** `--png` draws each render's log-frequency waterfall over
+  its loudness curve. Read the PNGs: a whistle, a pluck, a dropout or a
+  build-up is obvious there and slow to prove with a metric. (It showed
+  that every render starts with ~6 s of broadband reverb tail from the
+  generators switching on; ignore the first seconds.)
 - A draft whose envβ sits near 2 is on the steep side of the preference
   curve: its score jumps between renders. Fix the sound (in the whistle
   draft, adding the phaser took it from 0.46 to ~0.9), not the measurement.
@@ -91,22 +105,22 @@ node scripts/analyze.mjs --preset 12,13,14 --secs 60 --character --repeat 2 --wa
 
 ## 3. Changing one part? Compare in the same rooms, and prove the rest stayed
 
-When you retune a part of the sound (the bass, the top), the random room
-moves those very metrics more than your variants do. The same point read
-low-end roughness 0.046 and 0.034 on two runs. Use seeded rooms:
+When you retune a part of the sound (the bass, the top), the room moves
+those very metrics more than your variants do: the same point read low-end
+roughness 0.046 and 0.034 in two random rooms. Renders are seeded now, so
+compare in the same rooms, from a snapshot so you can keep editing:
 
 ```bash
-node .claude/skills/new-preset/seeded-snapshot.mjs /tmp/…/seedsnap   # re-run after every edit
-cd /tmp/…/seedsnap && node scripts/analyze.mjs --preset 12,13,14 --secs 60 --repeat 3 --wav /tmp/…/out
-node <project>/.claude/skills/new-preset/bands.mjs /tmp/…/out/seed0 --f0 55 --keep 600-2400
+node .claude/skills/new-preset/snapshot.mjs /tmp/…/snap   # re-run after every edit
+cd /tmp/…/snap && node scripts/analyze.mjs --preset 12,13,14 --secs 60 --repeat 3 --wav /tmp/…/out
+node <project>/.claude/skills/new-preset/bands.mjs /tmp/…/out/seed1 --f0 55 --keep 600-2400
 ```
 
-Render k uses room k for every point. Believe a ranking only when all
+Render k uses seed k for every point. Believe a ranking only when all
 seeds agree. `bands.mjs` reports bass roughness, fundamental share, body,
 grit and wobble, and the `--keep` band's Δ dB and correlation against the
 first file: **0.0 / 1.00 means the band you promised not to touch did not
-move.** Noise formulas (ocean, rain, noiselp, pink/brown/velvet, karplus)
-still use `Math.random` and vary a little.
+move.**
 
 ## 4. Check the idea itself, not only the scores
 
@@ -145,8 +159,8 @@ npm run check && npm run smoke && npm run build      # the verify skill
 
 ## 7. Hand it to the user
 
-- Render listening WAVs at 44.1 kHz, **in the same room** (seeded
-  snapshot, one seed), into `shots/<preset>/` (gitignored), e.g.
+- Render listening WAVs at 44.1 kHz, **in the same room** (no `--repeat`:
+  seed 1, the room the app plays), into `shots/<preset>/` (gitignored), e.g.
   `1-before.wav`, `2-gentler.wav`, `3-after.wav`. The user listens, you
   can't.
 - Ask what they hear. Once they accept, record it in PLAN.md "Decisions"

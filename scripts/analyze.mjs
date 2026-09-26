@@ -41,6 +41,14 @@
 //       # for --at seconds, then switches to the next; reports clicks
 //       # (src/analysis/clicks.ts) around every switch and elsewhere
 //
+//   node scripts/analyze.mjs --picture --preset 13,14 [--minutes 5] [--every 30] [--res 128]
+//       # numbers for the PICTURE (PLAN.md #22): each preset plays with sound
+//       # in its own page, and every --every seconds the simulation's V
+//       # channel is read back: coverage (share of the canvas holding
+//       # pattern), edges (how intricate), change (mean |ΔV| since the last
+//       # sample). Flags a pattern that died or froze. Real time, and this
+//       # machine draws a few fps, so the pattern evolves slower than on a
+//       # phone: compare presets with each other, not with a device
 //   node scripts/analyze.mjs --preset 12 --repeat 4 [--wav shots/wav]
 //       # render each point in 4 rooms, print mean ± sd: render k uses seed k
 //       # (src/audio/seed.ts — the reverb room and the noise formulas) for
@@ -65,7 +73,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseFlags, startServer, launchBrowser, captureErrors, openApp, withParam } from './lib.mjs';
 
-const { flags } = parseFlags(process.argv.slice(2), ['preset', 'hash', 'secs', 'sr', 'mutants', 'random', 'wav', 'json', 'seed', 'configs', 'switch', 'at', 'fps', 'grid', 'scale', 'size', 'warm', 'reps', 'repeat', 'ref', 'png']);
+const { flags } = parseFlags(process.argv.slice(2), ['preset', 'hash', 'secs', 'sr', 'mutants', 'random', 'wav', 'json', 'seed', 'configs', 'switch', 'at', 'fps', 'grid', 'scale', 'size', 'warm', 'reps', 'repeat', 'ref', 'png', 'minutes', 'every', 'res']);
 const SECS = Number(flags.get('secs') ?? 30);
 const SR = Number(flags.get('sr') ?? 22050);
 const MUTANTS = Number(flags.get('mutants') ?? 0);
@@ -237,6 +245,50 @@ if (flags.has('render')) {
         await ctx.close();
       }
     }
+  }
+  await browser.close();
+  stop();
+  if (errors.length) console.error('errors:', errors);
+  process.exit(errors.length ? 2 : 0);
+}
+
+if (flags.has('picture')) {
+  const minutes = Number(flags.get('minutes') ?? 5);
+  const every = Number(flags.get('every') ?? 30);
+  const res = Number(flags.get('res') ?? 128);
+  const presets = (flags.get('preset') ?? '0').split(',').map(Number);
+  console.log(`picture, grid ${res}, sampled every ${every}s for ${minutes} min — cov: share holding pattern, edges: share on a boundary, chg: mean |ΔV|`);
+  const runs = await Promise.all(presets.map(async (i) => {
+    // a context (window) each: every page keeps drawing
+    const ctx = await browser.newContext({ viewport: { width: 640, height: 400 } });
+    const pg = await ctx.newPage();
+    captureErrors(pg, errors, () => `picture ${i}`);
+    await openApp(pg, `${BASE}/?preset=${i}&res=${res}&probe=1&scout=0`);
+    await pg.locator('#audioBtn').click();
+    const name = await pg.locator('#pointsBtn').textContent();
+    const samples = [];
+    for (let t = every; t <= minutes * 60; t += every) {
+      await pg.waitForTimeout(every * 1000);
+      samples.push({ t, ...await pg.evaluate(async () => {
+        const { pictureMetrics } = await import('/src/analysis/picture.ts');
+        const s = window.synesthesiaProbe();
+        const m = pictureMetrics(s.v, s.width, s.height, window.__prevV);
+        window.__prevV = s.v;
+        return m;
+      }) });
+    }
+    await ctx.close();
+    return { name: name.trim(), samples };
+  }));
+  for (const r of runs) {
+    const col = (k, d) => r.samples.map((m) => pad(fmt(m[k], d), 6)).join('');
+    const died = r.samples.find((m) => !m.alive);
+    const frozen = r.samples.slice(1).find((m) => m.change < 1e-4);
+    console.log(`\n${r.name}${died ? `  DIED by ${died.t}s` : ''}${frozen ? `  FROZE by ${frozen.t}s` : ''}`);
+    console.log(`  t      ${r.samples.map((m) => pad(`${m.t}s`, 6)).join('')}`);
+    console.log(`  cov    ${col('coverage', 2)}`);
+    console.log(`  edges  ${col('edges', 2)}`);
+    console.log(`  chg    ${col('change', 3)}`);
   }
   await browser.close();
   stop();

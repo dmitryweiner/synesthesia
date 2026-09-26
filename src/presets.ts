@@ -537,6 +537,106 @@ export const PRESETS: readonly Preset[] = [
     ],
     coupling: { brightToShift: 0.6, loudToGloss: 0.5, onsetToLight: 0.3, loudToPulse: 0.7, onsetToFlash: 0.3, onsetToSeed: 0.4, spectrumToTint: 0.8 },
   }),
+
+  preset('Candle glaze', {
+    // Every LFO is pink (1/f, PLAN.md #18): the drone's flame, a resonant
+    // low-pass over a 49 Hz grid, rises and sinks with the statistics of a
+    // real flame, of wind or a heartbeat, at four unrelated rates, so it
+    // never repeats. Three slow ones (0.013–0.034 Hz) carry the big
+    // gestures (the flame's height, the beating pair, the echo); a fast one
+    // (0.34 Hz) flickers the FM lace, because a flame flickers faster than
+    // it breathes. Bass: a nearly pure 49 Hz sine (dist, α 0.9).
+    // Picture: Glaze worms drifting up; the flame-height LFO also moves
+    // Feed, the 0.034 Hz one turns the light, the slowest one the hue.
+    // Measured (60 s, two seeded rooms): fractality 0.87 ± 0.08 against
+    // 0.84 for the same preset on sine LFOs, whose timbre is smoother
+    // (cenβ 1.48 vs 1.32; 1 is 1/f). Distance 0.94 to the liked family.
+    masterGain: 0.72,
+    fx: {
+      ...LIMITED,
+      filterOn: true, filterType: 'lowpass', filterFreq: 1400, filterQ: 4,
+      chorusOn: true, chorusMode: 'chorus', chorusRate: 0.06, chorusDepth: 6, chorusMix: 0.3, chorusFb: 0.2,
+      phaserOn: true, phaserRate: 0.2, phaserDepth: 0.6, phaserStages: 6, phaserFb: 0.35, phaserMix: 0.35,
+      delayOn: true, delayTime: 0.71, delayFb: 0.4, delayMix: 0.25,
+      reverbOn: true, reverbDecay: 5.5, reverbMix: 0.4,
+    },
+    formulas: {
+      additive: { gain: 0.5, fund: 49, N: 28, move: 0.08 },
+      dist: { gain: 0.26, fd: 49, alpha: 0.9 },
+      fm: { gain: 0.14, fc: 392, fm: 49, I: 3 },
+      beats: { gain: 0.22, fbeat: 98, df: 0.3 },
+    },
+    reaction: { feed: 0.037, kill: 0.06, speed: 16 },
+    fieldVariation: { feedVarAmount: 0.008, feedVarScale: 3, feedVarWarp: 1.2, killVarAmount: 0.004, killVarScale: 4, killVarWarp: 1 },
+    flow: { curlStrength: 0.01, curlScale: 2.5, driftY: -0.003, advectAmount: 0.3, evolveRate: 0.008 },
+    palette: { paletteId: 1, contrast: 1.2, relief: 1.2, gloss: 0.45 },
+    lfos: [
+      { shape: 'pink', rate: 0.021, phase: 0 },
+      { shape: 'pink', rate: 0.034, phase: 0.3 },
+      { shape: 'pink', rate: 0.34, phase: 0.6 },
+      { shape: 'pink', rate: 0.013, phase: 0.9 },
+    ],
+    routes: [
+      { src: 0, target: 'fx', param: 'filterFreq', depth: 0.25, exp: true },
+      { src: 0, target: 'reaction', param: 'feed', depth: 0.15 },
+      { src: 2, target: 'fm', param: 'I', depth: 0.15 },
+      { src: 1, target: 'palette', param: 'lightAngle', depth: 0.4 },
+      { src: 2, target: 'fx', param: 'chorusDepth', depth: 0.3 },
+      { src: 2, target: 'fx', param: 'reverbMix', depth: 0.2 },
+      { src: 3, target: 'beats', param: 'df', depth: 0.01 },
+      { src: 3, target: 'fx', param: 'delayFb', depth: 0.15 },
+      { src: 3, target: 'palette', param: 'shift', depth: 0.1 },
+    ],
+    coupling: { brightToShift: 0.4, loudToGloss: 0.5, onsetToLight: 0.3, loudToPulse: 0.7, onsetToFlash: 0.3, onsetToSeed: 0.4, spectrumToTint: 0.6 },
+  }),
+
+  preset('Tanpura halo', {
+    // A drone that breathes in plucks (PLAN.md #20): four tanpura strings
+    // Pa–Sa–Sa–Sa on a 65 Hz Sa, plucked in a 7 s cycle, with the jawari
+    // buzz (a pink LFO lets it come and go), a round 65 Hz sine under them,
+    // and an echo that climbs an octave on every pass: the halo. One sine
+    // LFO swells the shimmer and the picture's gloss and light together.
+    // Picture: Verdigris cells that divide (Pearson η, F 0.034, k 0.063);
+    // every pluck the onset detector hears seeds a new cell and a ripple.
+    // Measured (60 s, two seeded rooms): distance 0.91 to the liked family,
+    // no metric beyond 2 sd; dropout 4.6 dB; 20–23 onset hits per 30 s (the
+    // detector hears nearly every pluck and some echoes). Shimmer on vs off:
+    // +4 dB at 4–8 kHz, +12.5 dB above 8 kHz, within 0.2 dB below 2 kHz.
+    // Fractality 0.67 ± 0.07: the fat sine (gain 0.42, low-end share 0.84)
+    // smooths the loudness contour. At 0.3 it read 0.87 with a thin bottom
+    // (0.62); the bass won (the user's taste: round and fat).
+    masterGain: 0.68,
+    fx: {
+      ...LIMITED,
+      filterOn: true, filterType: 'lowpass', filterFreq: 2000, filterQ: 0.7,
+      chorusOn: true, chorusMode: 'chorus', chorusRate: 0.05, chorusDepth: 5, chorusMix: 0.25, chorusFb: 0.15,
+      delayOn: true, delayTime: 0.75, delayFb: 0.55, delayMix: 0.35, delayShimmer: 0.5,
+      reverbOn: true, reverbDecay: 7, reverbMix: 0.45,
+    },
+    formulas: {
+      tanpura: { gain: 1, tanSa: 65, tanCycle: 7, tanJawari: 0.6, tanSustain: 16, tanBright: 0.3 },
+      dist: { gain: 0.42, fd: 65, alpha: 0.9 },
+    },
+    reaction: { feed: 0.034, kill: 0.063, speed: 14 },
+    flow: { curlStrength: 0.006, curlScale: 3, advectAmount: 0.2, evolveRate: 0.006 },
+    palette: { paletteId: 2, bands: 2, contrast: 1.2, relief: 1.2, gloss: 0.5 },
+    lfos: [
+      { shape: 'sine', rate: 0.019, phase: 0 },
+      { shape: 'pink', rate: 0.029, phase: 0.5 },
+      { shape: 'triangle', rate: 0.041, phase: 0.25 },
+      { shape: 'random', rate: 0.023, phase: 0 },
+    ],
+    routes: [
+      { src: 0, target: 'fx', param: 'delayShimmer', depth: 0.3 },
+      { src: 0, target: 'palette', param: 'gloss', depth: 0.3 },
+      { src: 1, target: 'tanpura', param: 'tanJawari', depth: 0.2 },
+      { src: 2, target: 'fx', param: 'reverbMix', depth: 0.2 },
+      { src: 2, target: 'fx', param: 'chorusDepth', depth: 0.3 },
+      { src: 3, target: 'fx', param: 'delayFb', depth: 0.1 },
+      { src: 0, target: 'palette', param: 'lightAngle', depth: 0.4 },
+    ],
+    coupling: { loudToGloss: 0.4, onsetToLight: 0.4, loudToPulse: 0.6, onsetToFlash: 0.25, onsetToSeed: 0.6, spectrumToTint: 0.5 },
+  }),
 ];
 
 export const DEFAULT_PRESET_INDEX = 0;

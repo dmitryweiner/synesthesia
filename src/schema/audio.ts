@@ -167,6 +167,17 @@ export const FORMULAS: readonly FormulaDef[] = [
       { k: 'gain', name: 'Gain', min: 0, max: 1, step: 0.001, value: 0.10 },
       { k: 'velvetDensity', name: 'Density (imp/s)', min: 100, max: 10000, step: 10, value: 2000, exp: true },
     ] },
+  // Appended last (PLAN.md #20): an index shift would change every other
+  // formula's noise seed (src/audio/seed.ts).
+  { id: 'tanpura', title: 'Tanpura', tag: 'Drone', desc: 'four plucked strings Pa–Sa–Sa–Sa, jawari bridge buzz',
+    sliders: [
+      { k: 'gain', name: 'Gain', min: 0, max: 1, step: 0.001, value: 0.3 },
+      { k: 'tanSa', name: 'Low Sa (Hz)', min: 30, max: 220, step: 0.1, value: 55, exp: true },
+      { k: 'tanCycle', name: 'Cycle (s)', min: 2, max: 16, step: 0.1, value: 5, exp: true },
+      { k: 'tanJawari', name: 'Jawari', min: 0, max: 1, step: 0.01, value: 0.5 },
+      { k: 'tanSustain', name: 'Sustain (s)', min: 2, max: 30, step: 0.1, value: 16, exp: true },
+      { k: 'tanBright', name: 'Pluck brightness', min: 0, max: 1, step: 0.01, value: 0.45 },
+    ] },
 ];
 
 export function formulaDef(id: string): FormulaDef | undefined {

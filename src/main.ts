@@ -157,6 +157,15 @@ const RES_OVERRIDE = intParam('res', 64, 2048) || undefined; // 0 is not a grid
 // For scripts/analyze.mjs, whose page only renders audio offline: a running
 // loop kept the GPU process at ~2 cores for a picture nobody looks at.
 const PAUSED = new URLSearchParams(location.search).get('paused') === '1';
+// `?probe=1`: scripts/analyze.mjs --picture reads the simulation's state
+// through window.synesthesiaProbe (PLAN.md #22). Absent otherwise.
+const PROBE = new URLSearchParams(location.search).get('probe') === '1';
+
+declare global {
+  interface Window {
+    synesthesiaProbe?: () => { width: number; height: number; v: Float32Array };
+  }
+}
 const SCALE_OVERRIDE = intParam('scale', 64, 8192);          // 0 = uncapped, on purpose
 
 // How big to render. Without an override, the first frames of the real loop
@@ -192,6 +201,7 @@ function boot(): void {
     status.textContent = err instanceof Error ? err.message : 'WebGL2 unavailable.';
     return;
   }
+  if (PROBE) window.synesthesiaProbe = () => sim.readState();
   // Canvas and grid always move together: the display pass is bound by the
   // one and every reaction substep by the other.
   function applyQuality(): void {

@@ -11,12 +11,15 @@ you don't, and the search follows.
 - **One point, two senses.** A point is a *genome* of ~500 genes: which
   sound formulas are on and their parameters (21 generators from
   [formula-synth](../formula-synth/): additive, FM, Lorenz/Rössler chaos,
-  logistic map, Shepard tone, Risset bell, noises, …), the FX chain
-  (filter, chorus/flanger, phaser, delay, reverb, limiter), the image
+  logistic map, Shepard tone, Risset bell, noises, …, plus a tanpura:
+  four plucked strings with the jawari buzz), the FX chain (filter,
+  chorus/flanger, phaser, delay with an octave-up shimmer, reverb,
+  limiter), the image
   simulation (Gray–Scott reaction-diffusion with spatial feed/kill
   variation and curl-noise flow, from [chromaflux](../chromaflux/)), its
-  palette, a pool of 4 slow LFOs with up to 12 routes, and 5 audio→image
-  coupling weights.
+  palette, a pool of 4 slow LFOs (sine, triangle, saw, square, S&H, or
+  pink: 1/f wandering) with up to 12 routes, and 5 audio→image coupling
+  weights. Routes aimed at one parameter add up.
 - **Shared modulation.** An LFO route can target a synth parameter, an FX
   parameter or an image parameter. The built-in presets use this: in
   *Fractal garden* the same 77-second triangle sweeps the logistic map
@@ -152,7 +155,10 @@ node scripts/analyze.mjs --mutants 5 --configs 30@22050,8@16000
 node scripts/analyze.mjs --preset 0 --wav shots/wav
 node scripts/analyze.mjs --switch 0,3,10,7 --at 12  # clicks at preset switches
 node scripts/analyze.mjs --onsets                  # onset hits per preset at 60/30/15 fps
-node scripts/analyze.mjs --preset 12 --repeat 4     # mean ± sd over 4 renders (the reverb is fresh noise each time)
+node scripts/analyze.mjs --preset 12 --repeat 4     # mean ± sd over 4 seeded reverb rooms (a render repeats exactly)
+node scripts/analyze.mjs --preset 12 --secs 60 --png shots/png
+                                                  # a log-frequency waterfall + loudness picture per render
+node scripts/analyze.mjs --picture --preset 13,14  # the PICTURE in numbers: coverage, edges, change over 5 min
 node scripts/analyze.mjs --character --ref 0,3,5,6,8
                                                   # + character columns, and every point's distance
                                                   #   to a reference group of presets
