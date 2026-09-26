@@ -2,8 +2,11 @@
 // bundles as a self-contained module (see engine.ts: ?worker&url).
 import { FormulaGenerator, isFormulaId, DEFAULT_PARAMS } from '../dsp/generator';
 import type { FormulaId, Params } from '../dsp/generator';
-import type { LfoDef, LfoShape, ModRoute, ParamRanges } from '../dsp/mod';
+import type { LfoDef, ModRoute, ParamRanges } from '../dsp/mod';
+import { isLfoShape } from '../dsp/mod';
 import { applyGate, gateIsSilent } from '../dsp/gate';
+import { mulberry32 } from '../dsp/rng';
+import { OctaveShimmer } from '../dsp/shimmer';
 
 function toParams(v: unknown): Params {
   const out: Params = {};
@@ -20,14 +23,9 @@ function toFormulaId(v: unknown): FormulaId {
 }
 
 // Tolerant parse of the modulation payload (engine sends it, but onmessage
-// sees unknown — narrowed without casts). Local so the worklet stays
-// self-contained.
-const LFO_SHAPES: ReadonlySet<string> = new Set(['sine', 'triangle', 'saw', 'square', 'random']);
+// sees unknown — narrowed without casts).
 function isRecord(u: unknown): u is Record<string, unknown> {
   return typeof u === 'object' && u !== null;
-}
-function isLfoShape(v: unknown): v is LfoShape {
-  return typeof v === 'string' && LFO_SHAPES.has(v);
 }
 function toArray(v: unknown): unknown[] {
   return Array.isArray(v) ? v : [];
@@ -87,13 +85,16 @@ class FormulaGeneratorProcessor extends AudioWorkletProcessor {
     let formula: FormulaId = 'fm';
     let params: Params = { ...DEFAULT_PARAMS };
     let enabled = false;
+    let seed = 1;
     if (typeof o === 'object' && o !== null) {
       const rec: Record<string, unknown> = { ...o };
       formula = toFormulaId(rec.formula);
       params = toParams(rec.params);
       enabled = rec.enabled === true;
+      if (typeof rec.seed === 'number') seed = rec.seed;
     }
-    this.gen = new FormulaGenerator(formula, sampleRate, params);
+    // Seeded noise (src/audio/seed.ts): the same point renders the same samples.
+    this.gen = new FormulaGenerator(formula, sampleRate, params, mulberry32(seed));
     this.enabled = enabled;
     this.fade = enabled ? 1 : 0;
     if (typeof o === 'object' && o !== null) {
@@ -128,3 +129,23 @@ class FormulaGeneratorProcessor extends AudioWorkletProcessor {
 }
 
 registerProcessor('formula-generator', FormulaGeneratorProcessor);
+
+// The delay's feedback loop runs through this node: delay → feedback gain →
+// shimmer → delay (PLAN.md #20). amount 0 is a bit-exact pass-through.
+class ShimmerProcessor extends AudioWorkletProcessor {
+  static get parameterDescriptors(): { name: string; defaultValue: number; minValue: number; maxValue: number; automationRate: string }[] {
+    return [{ name: 'amount', defaultValue: 0, minValue: 0, maxValue: 1, automationRate: 'k-rate' }];
+  }
+
+  private shimmer = new OctaveShimmer(sampleRate);
+  private silence = new Float32Array(128);
+
+  process(inputs: Float32Array[][], outputs: Float32Array[][], parameters: Record<string, Float32Array>): boolean {
+    const out = outputs[0][0];
+    const input = inputs[0][0] ?? this.silence.subarray(0, out.length);
+    this.shimmer.process(input, out, parameters.amount[0] ?? 0);
+    return true;
+  }
+}
+
+registerProcessor('shimmer', ShimmerProcessor);

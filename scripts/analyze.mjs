@@ -41,10 +41,18 @@
 //       # for --at seconds, then switches to the next; reports clicks
 //       # (src/analysis/clicks.ts) around every switch and elsewhere
 //
-//   node scripts/analyze.mjs --preset 12 --repeat 4
-//       # render each point 4 times, print mean ± sd of the score: the reverb
-//       # impulse is fresh noise per build, and a point sitting on the steep
-//       # side of a preference curve moves by ±0.1 between renders
+//   node scripts/analyze.mjs --preset 12 --repeat 4 [--wav shots/wav]
+//       # render each point in 4 rooms, print mean ± sd: render k uses seed k
+//       # (src/audio/seed.ts — the reverb room and the noise formulas) for
+//       # EVERY point, so points compare as pairs. A point on the steep side
+//       # of a preference curve moves by ±0.1 between rooms. With --wav, each
+//       # seed's WAVs land in <dir>/seed<k>/. One seed renders identically
+//       # every time (seed 1 is what the app plays)
+//   node scripts/analyze.mjs --preset 12 --secs 60 --png shots/png
+//       # + a picture of every render: log-frequency waterfall (30 Hz – 12 kHz,
+//       # 72 dB, brighter = louder) over the RMS loudness curve. An agent can't
+//       # hear, but it can read the image (PLAN.md #22). With --repeat, one per
+//       # seed in <dir>/seed<k>/; mutants are drawn too
 //   node scripts/analyze.mjs --character --ref 0,3,5,6,8 --preset 0,3,5,6,8,12
 //       # + character columns (src/analysis/character.ts: dropout, swing,
 //       # low-end share, harmonicity, roughness, motion at 1 s / 10 s) and
@@ -57,7 +65,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseFlags, startServer, launchBrowser, captureErrors, openApp, withParam } from './lib.mjs';
 
-const { flags } = parseFlags(process.argv.slice(2), ['preset', 'hash', 'secs', 'sr', 'mutants', 'random', 'wav', 'json', 'seed', 'configs', 'switch', 'at', 'fps', 'grid', 'scale', 'size', 'warm', 'reps', 'repeat', 'ref']);
+const { flags } = parseFlags(process.argv.slice(2), ['preset', 'hash', 'secs', 'sr', 'mutants', 'random', 'wav', 'json', 'seed', 'configs', 'switch', 'at', 'fps', 'grid', 'scale', 'size', 'warm', 'reps', 'repeat', 'ref', 'png']);
 const SECS = Number(flags.get('secs') ?? 30);
 const SR = Number(flags.get('sr') ?? 22050);
 const MUTANTS = Number(flags.get('mutants') ?? 0);
@@ -238,10 +246,11 @@ if (flags.has('render')) {
 
 const page = await browser.newPage();
 captureErrors(page, errors);
-// The page is the app itself, and its rAF loop keeps painting while audio
-// renders offline: at the default canvas the GPU process took ~2.5 cores
-// for a picture nobody looks at. A 64 px canvas makes that negligible.
-await openApp(page, `${BASE}/?res=64&scale=64`);
+// The page is the app itself, and its rAF loop kept painting while audio
+// rendered offline: at the default canvas the GPU process took ~2.5 cores
+// for a picture nobody looks at. ?paused=1 never starts the loop; the 64 px
+// canvas stays so a page without the flag (an older checkout) is still cheap.
+await openApp(page, `${BASE}/?res=64&scale=64&paused=1`);
 
 // Build the candidate list in the page (the genome code is TypeScript).
 const candidates = await page.evaluate(async ({ presetArg, hash, mutants, random, seed }) => {
@@ -291,6 +300,99 @@ async function renderScore(state, secs, sr) {
   }, { state, secs, sr });
 }
 
+/** A point's label as a file name (WAVs and PNGs share it). */
+const fileName = (label) => label.replace(/[^\w]+/g, '_').replace(/^_|_$/g, '');
+
+// --png: drawn in the page (canvas), returned as base64. Sequential magnitude
+// = one hue, dark → light on a dark surface (the dataviz skill's blue ramp);
+// grid and labels stay recessive and neutral.
+async function drawRenderPng(samples, sr, title) {
+  const { logSpectrogram } = await import('/src/analysis/spectrogram.ts');
+  const W = 1200, SPEC_H = 320, LOUD_H = 90, L = 52, R = 14, TOP = 26, GAP = 14, BOTTOM = 22;
+  const sp = logSpectrogram(samples, sr, { columns: W, rows: SPEC_H });
+  const cv = document.createElement('canvas');
+  cv.width = L + W + R;
+  cv.height = TOP + SPEC_H + GAP + LOUD_H + BOTTOM;
+  const g = cv.getContext('2d');
+  const SURFACE = '#14161a', INK = '#e6e8eb', MUTED = '#9aa0a8', GRID = 'rgba(255,255,255,0.16)', LINE = '#6da7ec';
+  g.fillStyle = SURFACE;
+  g.fillRect(0, 0, cv.width, cv.height);
+  // blue ramp 700 → 100, then white: quiet recedes into the surface
+  const stops = ['#14161a', '#0d366b', '#1c5cab', '#3987e5', '#86b6ef', '#cde2fb', '#ffffff'].map((h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)));
+  let top = -Infinity;
+  for (const v of sp.db) top = Math.max(top, v);
+  const RANGE = 72;
+  const img = g.createImageData(W, SPEC_H);
+  for (let i = 0; i < sp.db.length; i++) {
+    const u = Math.max(0, Math.min(1, (sp.db[i] - (top - RANGE)) / RANGE)) * (stops.length - 1);
+    const k = Math.min(stops.length - 2, Math.floor(u));
+    const f = u - k;
+    for (let ch = 0; ch < 3; ch++) img.data[i * 4 + ch] = stops[k][ch] + (stops[k + 1][ch] - stops[k][ch]) * f;
+    img.data[i * 4 + 3] = 255;
+  }
+  g.putImageData(img, L, TOP);
+  g.font = '12px sans-serif';
+  g.textBaseline = 'middle';
+  // frequency grid: row of a frequency = inverse of rowHz
+  const fMax = sp.rowHz(0), fMin = sp.rowHz(SPEC_H - 1);
+  const rowOf = (hz) => ((SPEC_H - 1) * Math.log(fMax / hz)) / Math.log(fMax / fMin);
+  for (const hz of [50, 100, 200, 500, 1000, 2000, 5000, 10000]) {
+    if (hz < fMin || hz > fMax) continue;
+    const y = TOP + rowOf(hz) + 0.5;
+    g.strokeStyle = GRID;
+    g.lineWidth = 1;
+    g.beginPath(); g.moveTo(L, y); g.lineTo(L + W, y); g.stroke();
+    g.fillStyle = MUTED;
+    g.textAlign = 'right';
+    g.fillText(hz >= 1000 ? `${hz / 1000}k` : String(hz), L - 6, y);
+  }
+  // loudness strip, 10 dB grid
+  const lo = Math.min(...sp.loudness), hi = Math.max(...sp.loudness);
+  let yMax = Math.ceil(hi / 10) * 10, yMin = Math.floor(lo / 10) * 10;
+  if (yMax - yMin < 20) yMin = yMax - 20;
+  yMin = Math.max(yMin, yMax - 60);
+  const loudTop = TOP + SPEC_H + GAP;
+  const yOf = (db) => loudTop + (LOUD_H * (yMax - Math.max(yMin, db))) / (yMax - yMin);
+  for (let db = yMin; db <= yMax; db += 10) {
+    const y = Math.round(yOf(db)) + 0.5;
+    g.strokeStyle = GRID;
+    g.beginPath(); g.moveTo(L, y); g.lineTo(L + W, y); g.stroke();
+    g.fillStyle = MUTED;
+    g.textAlign = 'right';
+    g.fillText(String(db), L - 6, y);
+  }
+  g.strokeStyle = LINE;
+  g.lineWidth = 2;
+  g.lineJoin = 'round';
+  g.beginPath();
+  for (let c = 0; c < W; c++) (c ? g.lineTo : g.moveTo).call(g, L + c + 0.5, yOf(sp.loudness[c]));
+  g.stroke();
+  // time axis
+  const secs = samples.length / sr;
+  const step = secs > 120 ? 30 : secs > 30 ? 10 : 5;
+  g.fillStyle = MUTED;
+  g.textAlign = 'center';
+  for (let t = 0; t <= secs; t += step) {
+    const x = L + (W * t) / secs;
+    g.strokeStyle = GRID;
+    g.lineWidth = 1;
+    g.beginPath(); g.moveTo(x + 0.5, TOP); g.lineTo(x + 0.5, TOP + SPEC_H); g.stroke();
+    g.fillText(`${t}s`, x, cv.height - BOTTOM / 2);
+  }
+  g.textAlign = 'left';
+  g.fillStyle = INK;
+  g.fillText(title, L, TOP / 2);
+  g.fillStyle = MUTED;
+  g.textAlign = 'right';
+  g.fillText('Hz · brighter = louder (72 dB)   |   RMS dBFS below', L + W, TOP / 2);
+  return cv.toDataURL('image/png').split(',')[1];
+}
+
+function writePng(dir, name, b64) {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${name}.png`), Buffer.from(b64, 'base64'));
+}
+
 /** 16-bit mono WAV of base64 PCM, named after the point's label. */
 function writeWav(dir, label, b64) {
   mkdirSync(dir, { recursive: true });
@@ -300,8 +402,7 @@ function writeWav(dir, label, b64) {
   hdr.write('fmt ', 12); hdr.writeUInt32LE(16, 16); hdr.writeUInt16LE(1, 20); hdr.writeUInt16LE(1, 22);
   hdr.writeUInt32LE(SR, 24); hdr.writeUInt32LE(SR * 2, 28); hdr.writeUInt16LE(2, 32); hdr.writeUInt16LE(16, 34);
   hdr.write('data', 36); hdr.writeUInt32LE(pcm.length, 40);
-  const name = label.replace(/[^\w]+/g, '_').replace(/^_|_$/g, '');
-  writeFileSync(join(dir, `${name}.wav`), Buffer.concat([hdr, pcm]));
+  writeFileSync(join(dir, `${fileName(label)}.wav`), Buffer.concat([hdr, pcm]));
 }
 
 function ranks(xs) {
@@ -413,10 +514,8 @@ if (flags.has('configs')) {
   process.exit(errors.length ? 2 : 0);
 }
 
-// --repeat N: the same point renders differently every time (the reverb
-// impulse is fresh noise per build), and the score moves with it — 0.28
-// vs 0.52 for one point. Render N times and print mean ± sd before
-// comparing points that differ by less than that.
+// --repeat N: the room (reverb impulse) moves the score — 0.28 vs 0.52 for
+// one point. Render k uses seed k for every point: N paired rooms, mean ± sd.
 const REPEAT = Math.max(1, Number(flags.get('repeat') ?? 1));
 const CHARACTER_KEYS = ['dropout', 'swing', 'lowShare', 'harmonicity', 'roughness', 'motion1s', 'motion10s'];
 const METRIC_KEYS = ['score', 'envBeta', 'centroidBeta', 'envHiguchi', 'boxDim', 'loudness', ...CHARACTER_KEYS];
@@ -427,20 +526,26 @@ const charHead = CHARACTER ? 'drop  swing low   harm  rough mot1  mot10 ' : '';
 console.log(`${pad('point', 34)} ${REPEAT > 1 ? 'score±sd    ' : 'score  '}envβ   cenβ   HFD    box    dB    ${charHead}(${SECS}s @ ${SR} Hz${REPEAT > 1 ? `, mean of ${REPEAT} renders` : ''})`);
 
 const results = [];
-for (const c of candidates) {
+const PNG_SOURCE = `(${drawRenderPng.toString()})`;
+for (const [ci, c] of candidates.entries()) {
   const t0 = Date.now();
   const runs = [];
   let wavB64 = null;
   for (let rep = 0; rep < REPEAT; rep++) {
-    const r = await page.evaluate(async ({ state, secs, sr, wantWav }) => {
+    const r = await page.evaluate(async ({ state, secs, sr, wantWav, seed, pngSource, label }) => {
       const { AudioEngine } = await import('/src/audio/engine.ts');
       const { analyzeSound } = await import('/src/analysis/fractal.ts');
       const { analyzeCharacter } = await import('/src/analysis/character.ts');
       const samples = await AudioEngine.renderOffline(
         { masterGain: state.audio.masterGain, fx: state.audio.fx, formulas: state.audio.formulas, mod: state.mod },
-        secs, sr,
+        secs, sr, [], seed,
       );
       const m = { ...analyzeSound(samples, sr), ...analyzeCharacter(samples, sr) };
+      let png = null;
+      if (pngSource) {
+        const draw = (0, eval)(pngSource);
+        png = await draw(samples, sr, `${label.trim()}  ·  ${secs} s @ ${sr} Hz  ·  seed ${seed}  ·  score ${m.score.toFixed(2)}`);
+      }
       let wav = null;
       if (wantWav) {
         const bytes = new Uint8Array(samples.length * 2);
@@ -450,14 +555,22 @@ for (const c of candidates) {
         for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
         wav = btoa(bin);
       }
-      return { m, wav };
-    }, { state: c.state, secs: SECS, sr: SR, wantWav: rep === 0 && flags.has('wav') && c.group !== 'mutant' });
+      return { m, wav, png };
+    }, { state: c.state, secs: SECS, sr: SR, wantWav: flags.has('wav') && c.group !== 'mutant' && (rep === 0 || REPEAT > 1), seed: rep + 1, pngSource: flags.has('png') ? PNG_SOURCE : null, label: c.label });
+    if (r.png) {
+      const name = c.group === 'mutant' ? `${fileName(c.label)}_${ci}` : fileName(c.label);
+      writePng(REPEAT > 1 ? join(flags.get('png'), `seed${rep + 1}`) : flags.get('png'), name, r.png);
+    }
     runs.push(r.m);
-    if (r.wav) wavB64 = r.wav;
+    if (r.wav && REPEAT > 1) writeWav(join(flags.get('wav'), `seed${rep + 1}`), c.label, r.wav);
+    else if (r.wav) wavB64 = r.wav;
   }
   const m = { ...runs[0] };
   for (const k of METRIC_KEYS) m[k] = meanOf(runs.map((x) => x[k]));
-  if (REPEAT > 1) m.scoreSd = sdOf(runs.map((x) => x.score));
+  if (REPEAT > 1) {
+    m.scoreSd = sdOf(runs.map((x) => x.score));
+    m.seedScores = runs.map((x) => x.score); // render k = seed k+1, paired across points
+  }
   const scoreCol = REPEAT > 1 ? `${fmt(m.score)}±${fmt(m.scoreSd)}  ` : fmt(m.score);
   results.push({ group: c.group, label: c.label, ...m });
   const charCols = CHARACTER

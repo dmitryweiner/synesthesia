@@ -127,4 +127,26 @@ describe('generator: block-rate modulation', () => {
     plain.fill(ref);
     expect(Array.from(buf)).not.toEqual(Array.from(ref));
   });
+
+  it('two routes on one param add up, and the base survives every block (PLAN.md #19)', () => {
+    // Saving/restoring per route used to write the FIRST route's effective
+    // value back as the base whenever a param had two routes: it drifted.
+    const lfos = [{ shape: 'sine' as const, rate: 3, phase: 0 }];
+    const ranges = { I: [0, 20] as const };
+    const two = new FormulaGenerator('fm', SR, { fc: 200, I: 2 }, mulberry32(1));
+    two.setMod(lfos, [
+      { src: 0, target: 'fm', param: 'I', depth: 0.02 },
+      { src: 0, target: 'fm', param: 'I', depth: 0.03 },
+    ], ranges);
+    const one = new FormulaGenerator('fm', SR, { fc: 200, I: 2 }, mulberry32(1));
+    one.setMod(lfos, [{ src: 0, target: 'fm', param: 'I', depth: 0.05 }], ranges);
+    const a = new Float32Array(BLOCK);
+    const b = new Float32Array(BLOCK);
+    for (let blk = 0; blk < 400; blk++) {
+      two.fill(a);
+      one.fill(b);
+      expect(two.p.I).toBe(2);
+    }
+    for (let i = 0; i < BLOCK; i++) expect(a[i]).toBeCloseTo(b[i], 6);
+  });
 });

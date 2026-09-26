@@ -52,6 +52,17 @@ describe('defaultAppState', () => {
 });
 
 describe('sanitizeState', () => {
+  it('keeps the fields added on 2026-09-26: a pink LFO and delay shimmer (PLAN.md #18, #20)', () => {
+    const p = sanitizeState({
+      audio: { fx: { delayOn: true, delayShimmer: 0.6 } },
+      mod: { lfos: [{ shape: 'pink', rate: 0.02, phase: 0.3 }], routes: [{ src: 0, target: 'fx', param: 'delayShimmer', depth: 0.2 }] },
+    });
+    expect(p?.audio?.fx?.delayShimmer).toBe(0.6);
+    expect(p?.mod?.lfos?.[0]?.shape).toBe('pink');
+    expect(p?.mod?.routes?.length).toBe(1);
+    expect(stateToAppState({ audio: { fx: { delayShimmer: 3 } } }).audio.fx.delayShimmer).toBe(1);
+  });
+
   it('rejects non-objects', () => {
     expect(sanitizeState(null)).toBeNull();
     expect(sanitizeState('x')).toBeNull();

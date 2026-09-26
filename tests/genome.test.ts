@@ -21,6 +21,11 @@ describe('genes', () => {
     expect(geneById('fx.filterType')?.kind).toBe('choice');
     expect(geneById('fx.phaserStages')?.kind).toBe('choice');
     expect(geneById('fx.reverbDecay')?.kind).toBe('cont');
+    // shimmer (PLAN.md #20): a wet amount of the delay — gated by it, fading to 0
+    const shimmer = geneById('fx.delayShimmer');
+    expect(shimmer?.activeIf).toBe('fx.delayOn');
+    expect(shimmer && shimmer.neutral !== undefined ? geneValue(shimmer, shimmer.neutral) : NaN).toBe(0);
+    expect(geneById('lfo.0.shape')?.max).toBe(5); // six shapes, pink last
     expect(geneById('v.flow.on')?.kind).toBe('bool');
     expect(geneById('v.flow.curlStrength')?.activeIf).toBe('v.flow.on');
     expect(geneById('v.reaction.feed')?.activeIf).toBeUndefined();

@@ -4,7 +4,8 @@
 // defaults. No `as` casts — only type guards.
 import type { Params } from '../dsp/generator';
 import { isFormulaId } from '../dsp/generator';
-import type { LfoDef, LfoShape, ModRoute, ModState } from '../dsp/mod';
+import type { LfoDef, ModRoute, ModState } from '../dsp/mod';
+import { isLfoShape } from '../dsp/mod';
 import type { FxState } from '../schema/audio';
 import {
   DEFAULT_FX, FORMULAS, FX_PARAM_RANGES, PHASER_STAGES, REVERB_DECAY_RANGE,
@@ -148,7 +149,7 @@ const FX_NUM_KEYS = [
   'filterFreq', 'filterQ', 'filterGain', 'filterVowel', 'filterCombFb',
   'chorusRate', 'chorusDepth', 'chorusMix', 'chorusFb',
   'reverbDecay', 'reverbMix', 'limiterThr', 'limiterRel',
-  'delayTime', 'delayFb', 'delayMix',
+  'delayTime', 'delayFb', 'delayMix', 'delayShimmer',
   'phaserRate', 'phaserDepth', 'phaserStages', 'phaserFb', 'phaserMix',
 ] as const;
 
@@ -193,11 +194,6 @@ function sanitizeCards(u: unknown): Record<string, PartialCardState> | undefined
     out[id] = snap;
   }
   return out;
-}
-
-const LFO_SHAPE_SET: ReadonlySet<string> = new Set(['sine', 'triangle', 'saw', 'square', 'random']);
-function isLfoShape(v: unknown): v is LfoShape {
-  return typeof v === 'string' && LFO_SHAPE_SET.has(v);
 }
 
 function sanitizeLfo(u: unknown): LfoDef | null {

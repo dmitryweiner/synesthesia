@@ -153,6 +153,10 @@ function intParam(name: string, min: number, max: number): number | undefined {
 }
 
 const RES_OVERRIDE = intParam('res', 64, 2048) || undefined; // 0 is not a grid
+// `?paused=1`: boot everything but never start the frame loop (PLAN.md #22).
+// For scripts/analyze.mjs, whose page only renders audio offline: a running
+// loop kept the GPU process at ~2 cores for a picture nobody looks at.
+const PAUSED = new URLSearchParams(location.search).get('paused') === '1';
 const SCALE_OVERRIDE = intParam('scale', 64, 8192);          // 0 = uncapped, on purpose
 
 // How big to render. Without an override, the first frames of the real loop
@@ -920,7 +924,8 @@ function boot(): void {
   let helpShown = false;
   try { helpShown = localStorage.getItem(HELP_SHOWN_KEY) === '1'; } catch { /* private mode */ }
   if (!helpShown) openHelp();
-  requestAnimationFrame(loop);
+  if (PAUSED) document.body.dataset.paused = '1';
+  else requestAnimationFrame(loop);
   document.body.dataset.ready = '1'; // readiness signal for scripts/*.mjs
 }
 

@@ -57,7 +57,7 @@ export function renderDetails(root: HTMLElement, state: AppState, analysis: Soun
     let extra = '';
     if (on === 'filterOn') extra = ` ${state.audio.fx.filterType} ${fmt(state.audio.fx.filterFreq)} Hz`;
     if (on === 'chorusOn') extra = ` ${state.audio.fx.chorusMode}`;
-    if (on === 'delayOn') extra = ` ${fmt(state.audio.fx.delayTime)} s`;
+    if (on === 'delayOn') extra = ` ${fmt(state.audio.fx.delayTime)} s${state.audio.fx.delayShimmer > 0.02 ? `, shimmer ${fmt(state.audio.fx.delayShimmer)}` : ''}`;
     if (on === 'reverbOn') extra = ` ${fmt(state.audio.fx.reverbDecay)} s`;
     fx.push(FX_LABEL[on] + extra);
   }

@@ -203,6 +203,7 @@ export interface FxState {
   reverbOn: boolean; reverbDecay: number; reverbMix: number;
   limiterOn: boolean; limiterThr: number; limiterRel: number;
   delayOn: boolean; delayTime: number; delayFb: number; delayMix: number;
+  delayShimmer: number; // 0..1: how much of the echo loop climbs an octave per pass
   phaserOn: boolean; phaserRate: number; phaserDepth: number; phaserStages: number;
   phaserFb: number; phaserMix: number;
 }
@@ -215,6 +216,7 @@ export const DEFAULT_FX: Readonly<FxState> = {
   reverbOn: false, reverbDecay: 2.8, reverbMix: 0.25,
   limiterOn: true, limiterThr: -12, limiterRel: 0.15,
   delayOn: false, delayTime: 0.35, delayFb: 0.4, delayMix: 0.3,
+  delayShimmer: 0, // the plain echo — every point made before shimmer sounds as it did
   phaserOn: false, phaserRate: 0.5, phaserDepth: 0.7, phaserStages: 4,
   phaserFb: 0.3, phaserMix: 0.5,
 };
@@ -231,7 +233,8 @@ export type FxModParam =
   | 'reverbMix'
   | 'delayTime' | 'delayFb' | 'delayMix'
   | 'phaserRate' | 'phaserDepth' | 'phaserFb' | 'phaserMix'
-  | 'limiterThr' | 'limiterRel';
+  | 'limiterThr' | 'limiterRel'
+  | 'delayShimmer';
 
 export const FX_MOD_PARAMS: readonly FxModParam[] = [
   'filterFreq', 'filterQ', 'filterGain', 'filterVowel', 'filterCombFb',
@@ -239,6 +242,7 @@ export const FX_MOD_PARAMS: readonly FxModParam[] = [
   'delayTime', 'delayFb', 'delayMix',
   'phaserRate', 'phaserDepth', 'phaserFb', 'phaserMix',
   'reverbMix', 'limiterThr', 'limiterRel',
+  'delayShimmer', // appended (PLAN.md #20)
 ];
 
 export const FX_PARAM_RANGES: Record<FxModParam, readonly [number, number]> = {
@@ -249,6 +253,7 @@ export const FX_PARAM_RANGES: Record<FxModParam, readonly [number, number]> = {
   delayTime: [0.05, 2.0], delayFb: [0, 0.9], delayMix: [0, 1],
   phaserRate: [0.1, 10], phaserDepth: [0, 1], phaserFb: [0, 0.9], phaserMix: [0, 1],
   limiterThr: [-40, 0], limiterRel: [0.02, 1],
+  delayShimmer: [0, 1],
 };
 
 /** Which FX module (on-flag) each modulatable field belongs to. */
@@ -259,6 +264,7 @@ export const FX_PARAM_MODULE: Record<FxModParam, FxOnKey> = {
   delayTime: 'delayOn', delayFb: 'delayOn', delayMix: 'delayOn',
   phaserRate: 'phaserOn', phaserDepth: 'phaserOn', phaserFb: 'phaserOn', phaserMix: 'phaserOn',
   limiterThr: 'limiterOn', limiterRel: 'limiterOn',
+  delayShimmer: 'delayOn',
 };
 
 export const FX_PARAM_LABELS: Record<FxModParam, string> = {
@@ -271,6 +277,7 @@ export const FX_PARAM_LABELS: Record<FxModParam, string> = {
   phaserRate: 'Phaser rate', phaserDepth: 'Phaser depth', phaserFb: 'Phaser feedback',
   phaserMix: 'Phaser mix',
   limiterThr: 'Limiter threshold', limiterRel: 'Limiter release',
+  delayShimmer: 'Delay shimmer',
 };
 
 // Frequency-like FX fields are modulated/mutated in octaves.

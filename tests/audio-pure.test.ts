@@ -72,6 +72,9 @@ describe('FX schema', () => {
       expect(typeof DEFAULT_FX[p]).toBe('number');
       expect(isFxModParam(p)).toBe(true);
     }
+    expect(isFxModParam('delayShimmer')).toBe(true);
+    expect(FX_PARAM_RANGES.delayShimmer).toEqual([0, 1]);
+    expect(DEFAULT_FX.delayShimmer).toBe(0); // 0 = the plain echo: existing points unchanged
     expect(isFxModParam('filterType')).toBe(false);
     expect(isFxModParam('reverbDecay')).toBe(false);
   });
@@ -88,6 +91,14 @@ describe('modulateFx', () => {
     ], lfos, 0.1);
     expect(eff.reverbMix).toBeCloseTo(DEFAULT_FX.reverbMix + 0.5, 12);
     expect(eff.reverbDecay).toBe(DEFAULT_FX.reverbDecay);
+  });
+
+  it('two routes on one field add up (PLAN.md #19)', () => {
+    const eff = modulateFx(DEFAULT_FX, [
+      { src: 0, target: 'fx', param: 'reverbMix', depth: 0.2 },
+      { src: 0, target: 'fx', param: 'reverbMix', depth: 0.3 },
+    ], lfos, 0.1);
+    expect(eff.reverbMix).toBeCloseTo(DEFAULT_FX.reverbMix + 0.5, 12);
   });
 
   it('no routes → identical copy', () => {

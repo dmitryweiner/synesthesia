@@ -10,7 +10,7 @@
 // For constant parameters the waveforms are unchanged.
 import type { Rng } from './rng';
 import type { LfoDef, ModRoute, ParamRanges } from './mod';
-import { lfoValue, effectiveParam } from './mod';
+import { modulatedParam } from './mod';
 
 export type FormulaId =
   | 'fm' | 'logistic' | 'gliss' | 'additive' | 'pm' | 'beats' | 'dist' | 'quasi'
@@ -144,6 +144,7 @@ export class FormulaGenerator {
   private modRoutes: readonly ModRoute[] = [];
   private modRanges: ParamRanges = {};
   private modSaved: number[] = [];
+  private modFirst: boolean[] = []; // route is the first one aimed at its param
 
   constructor(formula: FormulaId, sampleRate: number, params?: Params, rng: Rng = Math.random) {
     this.formula = formula;
@@ -208,17 +209,25 @@ export class FormulaGenerator {
 
     // Overwrite-then-restore: save base values of modulated params, write the
     // effective ones (constant across the block), run the block, restore.
+    // Each param is handled once, at its first route, with every route aimed
+    // at it added up (PLAN.md #19) — saving per route wrote an effective value
+    // back as the base whenever a param had two routes. No allocation here:
+    // this runs on the audio thread every block.
     const routes = this.modRoutes;
     const modSaved = this.modSaved;
-    modSaved.length = 0;
+    const modFirst = this.modFirst;
+    modSaved.length = routes.length;
+    modFirst.length = routes.length;
     for (let ri = 0; ri < routes.length; ri++) {
-      const r = routes[ri];
-      const base = p[r.param];
-      modSaved.push(base);
-      const lfo = this.modLfos[r.src];
-      const range = this.modRanges[r.param];
-      if (lfo === undefined || range === undefined || !Number.isFinite(base)) continue;
-      p[r.param] = effectiveParam(base, lfoValue(lfo, this.modT), r.depth, range, r.exp ?? false);
+      const param = routes[ri].param;
+      let first = true;
+      for (let rj = 0; rj < ri; rj++) if (routes[rj].param === param) { first = false; break; }
+      modFirst[ri] = first;
+      const base = p[param];
+      modSaved[ri] = base;
+      const range = this.modRanges[param];
+      if (!first || range === undefined || !Number.isFinite(base)) continue;
+      p[param] = modulatedParam(param, base, range, routes, this.modLfos, this.modT);
     }
 
     let phase = this.phase;
@@ -511,7 +520,7 @@ export class FormulaGenerator {
     this.nlp = nlp;
 
     // Restore base values of modulated params and advance LFO time.
-    for (let ri = 0; ri < routes.length; ri++) p[routes[ri].param] = modSaved[ri];
+    for (let ri = 0; ri < routes.length; ri++) if (modFirst[ri]) p[routes[ri].param] = modSaved[ri];
     this.modT += n / sr;
   }
 }

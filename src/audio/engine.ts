@@ -12,6 +12,7 @@ import type { ModRoute, ModState } from '../dsp/mod';
 import { clampNum, filterMode, toBiquadType, vowelFormants } from './filters';
 import { buildModPayload, modulateFx } from './modrouting';
 import type { ModPayload } from './modrouting';
+import { RENDER_SEED, generatorSeed, roomImpulse } from './seed';
 
 export interface FormulaSetting {
   enabled: boolean;
@@ -40,24 +41,21 @@ const REROUTE_RETURN_TC = 0.015;
 const SWITCH_GAP_MS = 40;      // preset switch: duck, rebuild FX, apply, fade in
 const SWITCH_RETURN_TC = 0.05; // ≈150 ms fade-in of the new preset
 
-function makeImpulseResponse(ctx: BaseAudioContext, seconds: number, decay: number): AudioBuffer {
+// The room is seeded (src/audio/seed.ts, PLAN.md #21): same params, same room.
+function makeImpulseResponse(ctx: BaseAudioContext, seconds: number, decay: number, seed: number): AudioBuffer {
   const sr = ctx.sampleRate;
   const len = Math.max(1, Math.floor(sr * seconds));
   const buf = ctx.createBuffer(2, len, sr);
-  for (let ch = 0; ch < 2; ch++) {
-    const data = buf.getChannelData(ch);
-    for (let i = 0; i < len; i++) {
-      const t = i / sr;
-      const env = Math.exp(-t / Math.max(1e-3, decay));
-      data[i] = (Math.random() * 2 - 1) * env;
-    }
-  }
+  const [l, r] = roomImpulse(len, sr, decay, seed);
+  buf.getChannelData(0).set(l);
+  buf.getChannelData(1).set(r);
   return buf;
 }
 
 export class AudioEngine {
   private ctx: BaseAudioContext | null = null;
   private offline = false;
+  private seed = RENDER_SEED;
   private analyserNode: AnalyserNode | null = null;
 
   private mixBus!: GainNode;
@@ -92,6 +90,8 @@ export class AudioEngine {
   private delayWet!: GainNode;
   private delayFb!: GainNode;
   private delaySum!: GainNode;
+  private shimmerNode!: AudioWorkletNode; // in the delay's feedback loop (PLAN.md #20)
+  private shimmerAmount!: AudioParam;
 
   private phaserFilters: BiquadFilterNode[] = [];
   private phaserLFO!: OscillatorNode;
@@ -160,16 +160,20 @@ export class AudioEngine {
   /**
    * Renders `seconds` of the given state offline (mono) — the exact live
    * graph, with FX modulation scheduled ahead as automation instead of the
-   * live control-rate timer.
+   * live control-rate timer. The same state and seed render the same
+   * samples; the live app plays seed RENDER_SEED, and the analysis passes
+   * other seeds to average over rooms.
    */
   static async renderOffline(
     state: EngineState, seconds: number, sampleRate = 44100,
     switches: readonly { t: number; state: EngineState }[] = [],
+    seed = RENDER_SEED,
   ): Promise<Float32Array> {
     const ctx = new OfflineAudioContext(1, Math.max(1, Math.round(seconds * sampleRate)), sampleRate);
     await ctx.audioWorklet.addModule(workletUrl);
     const eng = new AudioEngine();
     eng.offline = true;
+    eng.seed = seed;
     eng.build(ctx, state);
     const scheduleFxMod = (from: number, to: number): void => {
       const routes = eng.fxRoutes();
@@ -219,7 +223,7 @@ export class AudioEngine {
     this.modState = state.mod ?? null;
     this.applyFx(state.fx);
 
-    for (const f of FORMULAS) {
+    FORMULAS.forEach((f, index) => {
       const setting = state.formulas[f.id];
       const params: Params = setting ? { ...setting.params } : {};
       const enabled = setting ? setting.enabled : false;
@@ -230,6 +234,7 @@ export class AudioEngine {
         processorOptions: {
           formula: f.id, params, enabled,
           mod: this.modPayloadFor(f.id),
+          seed: generatorSeed(this.seed, index),
         },
       });
       const g = ctx.createGain();
@@ -243,7 +248,7 @@ export class AudioEngine {
         const gain = typeof params.gain === 'number' ? params.gain : 0;
         g.gain.setTargetAtTime(enabled ? gain : 0, ctx.currentTime, GAIN_SMOOTH);
       }
-    }
+    });
   }
 
   /** Creates every FX node (fresh delay lines/convolver: no tails). */
@@ -286,6 +291,13 @@ export class AudioEngine {
     this.delayWet = ctx.createGain();
     this.delayFb = ctx.createGain();
     this.delaySum = ctx.createGain();
+    this.shimmerNode = new AudioWorkletNode(ctx, 'shimmer', {
+      numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
+      channelCount: 1, channelCountMode: 'explicit',
+    });
+    const amount = this.shimmerNode.parameters.get('amount');
+    if (!amount) throw new Error('shimmer worklet has no amount parameter');
+    this.shimmerAmount = amount;
 
     const numPhaserStages = 8;
     this.phaserFilters = [];
@@ -323,7 +335,7 @@ export class AudioEngine {
       this.combInput, this.combDelay, this.combFb,
       this.chorusDelay, this.chorusDry, this.chorusWet, this.chorusFb, this.chorusSum, this.chorusLFOGain,
       this.reverbConv, this.reverbDry, this.reverbWet, this.reverbSum, this.limiter,
-      this.delayNode, this.delayDry, this.delayWet, this.delayFb, this.delaySum,
+      this.delayNode, this.delayDry, this.delayWet, this.delayFb, this.delaySum, this.shimmerNode,
       ...this.phaserFilters, ...this.phaserLFOGains, this.phaserDry, this.phaserWet, this.phaserFb,
       this.phaserInput, this.phaserOutput, this.phaserSum,
     ];
@@ -493,7 +505,7 @@ export class AudioEngine {
 
     this.delayNode.disconnect(); this.delayDry.disconnect();
     this.delayWet.disconnect(); this.delayFb.disconnect();
-    this.delaySum.disconnect();
+    this.delaySum.disconnect(); this.shimmerNode.disconnect();
 
     this.phaserDry.disconnect(); this.phaserWet.disconnect();
     this.phaserInput.disconnect(); this.phaserOutput.disconnect();
@@ -562,7 +574,8 @@ export class AudioEngine {
       node.connect(this.delayDry);
       node.connect(this.delayNode);
       this.delayNode.connect(this.delayFb);
-      this.delayFb.connect(this.delayNode);
+      this.delayFb.connect(this.shimmerNode);
+      this.shimmerNode.connect(this.delayNode);
       this.delayNode.connect(this.delayWet);
       this.delayDry.connect(this.delaySum);
       this.delayWet.connect(this.delaySum);
@@ -638,7 +651,7 @@ export class AudioEngine {
     if (!(Math.abs(fx.reverbDecay - this.lastReverbDecay) < 0.05)) {
       this.lastReverbDecay = fx.reverbDecay;
       const seconds = Math.min(6.0, Math.max(0.3, fx.reverbDecay * 1.4));
-      this.reverbConv.buffer = makeImpulseResponse(ctx, seconds, fx.reverbDecay);
+      this.reverbConv.buffer = makeImpulseResponse(ctx, seconds, fx.reverbDecay, this.seed);
     }
 
     set(this.limiter.threshold, fx.limiterThr);
@@ -651,6 +664,7 @@ export class AudioEngine {
     set(this.delayFb.gain, fx.delayFb);
     set(this.delayDry.gain, 1 - fx.delayMix);
     set(this.delayWet.gain, fx.delayMix);
+    set(this.shimmerAmount, clampNum(fx.delayShimmer, 0, 1));
 
     const stages = Math.max(1, Math.min(this.phaserFilters.length, Math.floor(fx.phaserStages)));
     if (fx.phaserOn && stages !== this.phaserStagesConnected) {

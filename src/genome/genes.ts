@@ -6,6 +6,7 @@
 import { FORMULAS, FX_MOD_PARAMS, FX_PARAM_RANGES, FX_PARAM_MODULE, FX_EXP_PARAMS, FX_PARAM_LABELS, FX_ON_KEYS, FILTER_TYPES, CHORUS_MODES, PHASER_STAGES, REVERB_DECAY_RANGE } from '../schema/audio';
 import { CARDS, ALWAYS_ON_CARD_IDS } from '../schema/visual';
 import { COUPLING_KEYS, COUPLING_RANGES, LFO_COUNT } from '../state/schema';
+import { LFO_SHAPE_LIST } from '../dsp/mod';
 
 export type GeneKind = 'cont' | 'bool' | 'choice';
 
@@ -37,7 +38,7 @@ export interface ModTarget {
 }
 
 export const ROUTE_SLOTS = 12;
-export const LFO_SHAPES = ['sine', 'triangle', 'saw', 'square', 'random'] as const;
+export const LFO_SHAPES = LFO_SHAPE_LIST; // append-only: the index is the gene value
 export const LFO_RATE_RANGE: readonly [number, number] = [0.003, 2];
 
 // Real-unit values with no audible/visible effect, per gated param key.
@@ -46,7 +47,7 @@ const NEUTRAL_REAL: Readonly<Record<string, number>> = {
   // formulas
   gain: 0,
   // FX (only wet mixes — a filter or limiter can't be faded that way)
-  chorusMix: 0, delayMix: 0, reverbMix: 0, phaserMix: 0,
+  chorusMix: 0, delayMix: 0, reverbMix: 0, phaserMix: 0, delayShimmer: 0,
   // visual cards
   feedVarAmount: 0, killVarAmount: 0,
   curlStrength: 0, advectAmount: 0, driftX: 0, driftY: 0,
