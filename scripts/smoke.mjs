@@ -4,8 +4,8 @@
 // button, undoes, loads every preset, saves a point and reloads it (the last
 // point comes back), shares a short ?presetId= link through a LOCAL points
 // Worker (Miniflare, never production) and opens it in a second tab, opens
-// an old #s= link, and checks the long-link fallback when the Worker is
-// unreachable. Fails on any console/page error or broken
+// an old #s= link, checks the long-link fallback when the Worker is
+// unreachable, and edits a point in ⚙ Settings. Fails on any console/page error or broken
 // invariant; checks invariants only, never pixels.
 //
 //   node scripts/smoke.mjs [--preview] [--mobile] [--res 128] [--screenshot shots/smoke.png]
@@ -24,6 +24,12 @@ const worker = await startPointsWorker();
 // every app URL: small grid + the local points Worker
 const app = (url) => withParam(withRes(url, RES), 'api', worker.url);
 const lastPoint = (p = page) => p.evaluate(() => localStorage.getItem('synesthesia_last_point_v1'));
+// The point is saved when its morph settles, which is a frame of the loop:
+// with the scout analysing on the main thread (a loaded machine, --mobile)
+// that frame can come seconds late, so wait for the save, not for a clock.
+const lastPointChange = (from, p = page) => p.waitForFunction(
+  (old) => localStorage.getItem('synesthesia_last_point_v1') !== old, from, { timeout: 15000 },
+).catch(() => {});
 // Same point, up to float noise (a restored point goes through the genome
 // codec, e.g. 55 → 55.00000000000001).
 function samePoint(a, b) {
@@ -181,6 +187,7 @@ await page.waitForTimeout(300);
 check((await statusText()).includes('continuing'), 'like status missing');
 if (scouted) check((await statusText()).includes('scouted: best of 3'), `like did not use the scout: "${await statusText()}"`);
 await page.waitForTimeout(MORPH_WAIT);
+await lastPointChange(last0);
 check((await lastPoint()) !== last0, 'last point not updated after like');
 check((await hashOf()) === '', 'the address bar must stay clean after a step');
 check(!(await page.locator('#undoBtn').isDisabled()), 'undo should be enabled after like');
@@ -212,6 +219,103 @@ for (let i = 0; i < 5; i++) {
   await page.waitForTimeout(100);
 }
 check(await page.locator('#undoBtn').isDisabled(), 'undo should be disabled once history is empty');
+
+// --- ⚙ Settings: full screen, the picture pauses, the sound goes on and
+// hears every change, closing is one undoable step (PLAN.md #28) ---
+ctxLabel = 'settings';
+{
+  const vp = page.viewportSize();
+  const loopState = () => page.evaluate(() => document.body.dataset.loop);
+  const soundEdits = () => page.evaluate(() => Number(document.body.dataset.soundEdits ?? 0));
+  await page.waitForTimeout(1200); // the last undo's morph settles and saves the point
+  const before = await lastPoint();
+  if (flags.has('mobile')) {
+    // one more toolbar icon must not squeeze the point's name (AGENTS.md)
+    const name = await page.locator('#pointsBtn').boundingBox();
+    check(name && name.width >= 150, `the point name is squeezed to ${name?.width}px on a phone`);
+    const rowsY = await page.$$eval('#topbar > button', (bs) => new Set(bs.filter((b) => b.offsetParent).map((b) => Math.round(b.getBoundingClientRect().top))).size);
+    check(rowsY <= 2, `the phone toolbar should stay two rows, got ${rowsY}`);
+  }
+  await page.locator('#settingsBtn').click();
+  await page.waitForSelector('#settings:not([hidden])', { timeout: 5000 });
+  const box = await page.locator('#settings').boundingBox();
+  check(box && box.x <= 0 && box.y <= 0 && box.width >= vp.width - 1 && box.height >= vp.height - 1, `the settings should cover the screen: ${JSON.stringify(box)}`);
+  const closeBox = await page.locator('#settingsCloseBtn').boundingBox();
+  check(closeBox && closeBox.x >= 0 && closeBox.x + closeBox.width <= vp.width + 1 && closeBox.y >= 0, `the settings' ✕ is off screen: ${JSON.stringify(closeBox)}`);
+  const paused = await page.waitForFunction(() => document.body.dataset.loop === 'paused', null, { timeout: 5000 }).then(() => true).catch(() => false);
+  check(paused, `the picture should stop while the settings are open (data-loop=${await loopState()})`);
+  check(((await page.locator('#audioBtn').textContent()) ?? '').includes('⏹'), 'the sound must keep playing behind the settings');
+  check(((await page.locator('#settingsSoundBtn').textContent()) ?? '').includes('⏹'), 'the settings\' Sound button should show it is playing');
+  const status0 = await statusText();
+  await page.keyboard.press('ArrowRight');
+  await page.waitForTimeout(150);
+  check((await statusText()) === status0, 'a key stepped the point behind the settings');
+
+  // Audio: a slider is heard at once
+  const edits0 = await soundEdits();
+  const slider = page.locator('#paneAudio .fcard.active input[type="range"]').first();
+  await slider.evaluate((n) => {
+    n.value = String(Number(n.value) > (Number(n.min) + Number(n.max)) / 2 ? n.min : n.max);
+    n.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await page.waitForTimeout(200);
+  check((await soundEdits()) > edits0, 'a sound change in the settings did not reach the engine');
+  // at most five formulas at once
+  const boxes = page.locator('#paneAudio .fcard-head input[type="checkbox"][id^="setF_"]');
+  const total = await boxes.count();
+  check(total >= 20, `expected every formula as a card, got ${total}`);
+  for (let i = 0; i < total; i++) {
+    if (await boxes.evaluateAll((els) => els.filter((e) => e.checked).length) >= 5) break;
+    const b = boxes.nth(i);
+    if (!(await b.isChecked()) && !(await b.isDisabled())) await b.check();
+  }
+  const capped = await boxes.evaluateAll((els) => ({ on: els.filter((e) => e.checked).length, blocked: els.filter((e) => !e.checked && e.disabled).length, free: els.filter((e) => !e.checked && !e.disabled).length }));
+  check(capped.on === 5 && capped.free === 0 && capped.blocked === total - 5, `the 5-formula cap: ${JSON.stringify(capped)}`);
+
+  // Video: the other tab; picture changes wait for the close
+  await page.locator('#tabVideo').click();
+  check(await page.locator('#paneVideo').isVisible() && await page.locator('#paneAudio').isHidden(), 'the Video tab did not switch the pane');
+  const pal = page.locator('#setV_palette_paletteId');
+  const palNow = await pal.inputValue();
+  await pal.selectOption(palNow === '2' ? '3' : '2');
+  // 12 routes at most, sound and picture together (the genome's slots):
+  // a full point offers no "+ add" until one goes
+  const allRoutes = async () => (await page.locator('#paneVideo .mod-route').count()) + (await page.locator('#paneAudio .mod-route').count());
+  if (await allRoutes() >= 12) {
+    check(await page.locator('#setVm_add').isDisabled(), 'a point with 12 routes must not offer another');
+    const routesFull = await page.locator('#paneVideo .mod-route').count();
+    await page.locator('#paneVideo .mod-del').first().click();
+    check((await page.locator('#paneVideo .mod-route').count()) === routesFull - 1, 'removing a picture route did not remove it');
+  }
+  const routes0 = await page.locator('#paneVideo .mod-route').count();
+  await page.locator('#setVm_add').click();
+  check((await page.locator('#paneVideo .mod-route').count()) === routes0 + 1, 'adding a picture route did not show it');
+  await page.waitForTimeout(300);
+  check((await loopState()) === 'paused', 'a picture change restarted the picture inside the settings');
+
+  // Escape closes: the picture runs again, and the point is one step
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('#settings[hidden]', { state: 'attached', timeout: 5000 });
+  const resumed = await page.waitForFunction(() => document.body.dataset.loop === 'running', null, { timeout: 5000 }).then(() => true).catch(() => false);
+  check(resumed, 'the picture did not resume after the settings closed');
+  check((await statusText()).includes('set by hand'), `closing with changes should be a step: "${await statusText()}"`);
+  check(((await page.locator('#undoBtn').textContent()) ?? '').includes('(1)'), `the edit should be one undoable step: "${await page.locator('#undoBtn').textContent()}"`);
+  const edited = await lastPoint();
+  check(!samePoint(edited, before), 'the edited point was not kept');
+  check(JSON.parse(edited ?? '{}').visual?.cards?.palette?.params?.paletteId === Number(palNow === '2' ? '3' : '2'), 'the palette picked in the settings is not in the point');
+  await page.locator('#undoBtn').click();
+  await lastPointChange(edited); // the undo morph, then the settle that saves the point
+  check(samePoint(await lastPoint(), before), '↩ did not take the settings edit back');
+
+  // opened and closed untouched: no step
+  const status1 = await statusText();
+  await page.locator('#settingsBtn').click();
+  await page.waitForSelector('#settings:not([hidden])', { timeout: 5000 });
+  await page.locator('#settingsCloseBtn').click();
+  await page.waitForTimeout(300);
+  check((await statusText()) === status1, `an untouched settings page should not make a step: "${await statusText()}"`);
+  check(await page.locator('#undoBtn').isDisabled(), 'an untouched settings page added an undo step');
+}
 
 // --- history depth caps at 5 ---
 ctxLabel = 'history-cap';

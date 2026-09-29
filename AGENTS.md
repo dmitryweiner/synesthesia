@@ -18,10 +18,12 @@ and code comments are in English.
 ```bash
 npm run check     # tsc --noEmit && eslint . && vitest run — after every change
 npm run smoke     # Playwright: boot, sound, 👍/👎/🎲/undo, every preset,
-                  # ?preset=N, save+reload, share link in a 2nd tab, scout.
+                  # ?preset=N, save+reload, share link in a 2nd tab, scout,
+                  # ⚙ Settings (picture paused, sound heard, one undo step).
                   # The ONLY check of WebGL2/Web Audio (vitest can't load them)
 npm run snap -- --out shots/x.png [--preset N] [--sound] [--like N] [--dislike N]
                   [--details] [--help] [--res N] [--wait ms]
+                  [--settings audio|video] [--scroll px]  # ⚙ Settings, pane scrolled
                   [--reseed] [--stroke x0,y0,x1,y1]  # drag on a clean field:
                   #   the only way to see what a touch actually painted
 npm run analyze   # fractality of the real sound (see "Sound analysis" below);
@@ -286,7 +288,7 @@ src/genome/evolve.ts   pure: mutate (sparse gaussian + momentum + one weighted
                        gated genes with `neutral` — formula gain, route depth,
                        FX wet mixes, flow/variation strengths — fade from/to
                        neutral as their gate opens/closes), diffSummary
-src/genome/explorer.ts like/dislike/surprise/undo(5)/load; proposeLike/
+src/genome/explorer.ts like/dislike/surprise/undo(5)/load/edit; proposeLike/
                        proposeDislike preview without committing, like(p)/
                        dislike(p) commit a chosen one; `version` bumps per change
 src/genome/scout.ts    background best-of-k (PLAN.md #7): renders parent + k
@@ -311,6 +313,20 @@ src/presets.ts         15 presets = formula-synth sound × chromaflux material,
 src/ui/details.ts      read-only "what is this point" panel (+ fractality);
                        renders into #detailsBody — the panel's own ✕ lives
                        outside it, so a re-render can't wipe it
+src/ui/settings.ts     ⚙ Settings (PLAN.md #28): full-screen page, tabs Audio
+                       (formula-synth's panel) / Video (chromaflux's + the
+                       sound → image links). Edits a copy of the point that is
+                       main.ts's `state` while open; onSound → engine push
+                       (throttled); the frame loop exits while it is open
+                       (body[data-loop]); close → Explorer.edit, one undo step
+src/ui/settingsModel.ts  pure side of it: log/linear slider scales, FX_CARDS
+                       (ranges from the gene ranges), filter rows per type,
+                       the 5-formula cap, routes per side (12 in total),
+                       samePoint. tests/settings.test.ts: every control
+                       round-trips through the genome
+src/ui/controls.ts, modPanel.ts, adjust.ts  the page's widgets: card, slider
+                       row (−/+ auto-repeat), select row; LFO pool + routes
+src/fxPresets.ts       one-module effect presets (ported from formula-synth)
 src/ui/touch.ts        pure: pointer → canvas UV (Y flips) and the stamps to
                        fill a drag between two frames. A touch runs the same
                        inject()+ripple an onset does (PLAN.md #14) — chromaflux's

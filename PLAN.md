@@ -575,6 +575,54 @@ them as 1-…).
     so the picture seeds on few of them and evolves mostly on its own.
     WAV: `shots/tanpura-halo/5-v4-softer-plucks-more-sea.wav`.
 
+## Decisions after a user request (2026-09-29)
+
+28. **⚙ Settings: every parameter of the point, for the curious.** Asked
+    for by the user, with the frame given:
+    - a **⚙ Settings** button in the top bar opens a **full-screen** page
+      with two tabs, **Audio** and **Video**;
+    - while it is open **the picture stops** (the frame loop exits; nothing
+      is simulated or drawn) and **the sound goes on**;
+    - **sound changes are heard at once** (pushed to the engine at most
+      every 50 ms during a drag, like a morph step); **picture changes show
+      after closing**;
+    - the Audio tab is ../formula-synth's panel (formula cards with −/+
+      sliders, the effects cards with the filter's type-dependent rows and
+      the one-module effect presets, the LFO matrix), the Video tab is
+      ../chromaflux's (the cards and the LFO matrix).
+
+    Defaults chosen while building it (open to change):
+    - *Closing with changes is one undoable step* (`Explorer.edit`): the
+      edited point becomes the anchor, so the next 👍 continues from it. It
+      is a jump, not a morph — the sound is already there — and the image is
+      not reseeded (🌱 Reseed is one tap away). Closing untouched changes
+      nothing. The point is not repaired: 0 formulas or a coupling sum
+      below the floor is the user's call until the next 👍/👎.
+    - *The UI can only set what the genome keeps*, because closing commits
+      through `encodeGenome`: at most 5 formulas at once (the others'
+      checkboxes are disabled), at most 12 routes for sound and picture
+      together, the LFO rate within 0.003–2 Hz
+      (`tests/settings.test.ts` round-trips every control at its ends and
+      in between).
+    - *The LFO pool is shared*, so both tabs show it; each tab lists only
+      its own side's routes. A route can aim at a formula that is off (it
+      stays, marked “(off)”), as in the siblings.
+    - *The Video tab also has the sound → image links* (the five nudges and
+      the four display effects of #8) — not in chromaflux, but they are how
+      this app's picture behaves.
+    - *Frequency-like sliders move in octaves* (1000 logarithmic steps,
+      ~8 cents across 20–2000 Hz); formula-synth's were linear. The LFO
+      rate shows its cycle in seconds.
+    - The effects are listed in the order the chain runs (Filter → Chorus
+      → Phaser → Delay → Reverb → Limiter). The master volume and a Sound
+      button are on the page too, since it covers the top bar.
+    - The scout pauses while the page is open (its candidates are about
+      the point being edited); Esc closes the page, and no key steps the
+      point behind it.
+    - Not ported: formula-synth's scope, recorder and per-formula reset;
+      chromaflux's resolution select and PNG export; Veins/Pour/Brush stay
+      out (#2).
+
 ## Architecture
 
 ```

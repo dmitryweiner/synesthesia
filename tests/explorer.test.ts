@@ -120,6 +120,39 @@ describe('Explorer', () => {
     expect(ex.lastAction).toBe('load');
   });
 
+  it('edit: a point set by hand in ⚙ Settings is one undoable step and the new anchor', () => {
+    const ex = new Explorer(start(), { rng: mulberry32(7) });
+    ex.like();
+    const before = [...ex.current];
+    const { version, undoDepth, sigma } = ex;
+    const edited = [...before];
+    const i = GENES.findIndex((g) => g.id === 'a.fm.fc');
+    edited[i] = edited[i] > 0.5 ? 0.1 : 0.9;
+    const got = ex.edit(edited);
+    expect(got).toEqual(edited);
+    expect(ex.current).toEqual(edited);
+    edited[i] = 0.5; // the explorer keeps its own copy
+    expect(ex.current[i]).not.toBe(0.5);
+    expect(ex.anchor).toEqual(ex.current); // "this is what I want" — the next 👍 starts here
+    expect(ex.lastAction).toBe('edit');
+    expect(ex.version).toBe(version + 1);
+    expect(ex.undoDepth).toBe(undoDepth + 1);
+    expect(ex.sigma).toBe(sigma);
+    expect(ex.undo()).toEqual(before);
+  });
+
+  it('edit keeps the point exactly as set — no repair (silence and a weak link are the user\'s call)', () => {
+    const s = defaultAppState(); // no formula enabled, couplings at their defaults
+    s.coupling.loudToPulse = 0;
+    s.coupling.onsetToFlash = 0;
+    s.coupling.onsetToSeed = 0;
+    s.coupling.spectrumToTint = 0;
+    const ex = new Explorer(start(), { rng: mulberry32(8) });
+    const g = encodeGenome(s);
+    expect(ex.edit(g)).toEqual(g);
+    expect(enabledFormulaCount(ex.current)).toBe(0);
+  });
+
   it('every produced genome keeps 1..MAX formulas enabled', () => {
     const ex = new Explorer(start(), { rng: mulberry32(6) });
     for (let i = 0; i < 200; i++) {
@@ -179,7 +212,8 @@ describe('Explorer: propose-then-commit (used by the scout)', () => {
     ex.dislike(); seen.add(ex.version);
     ex.surprise(start()); seen.add(ex.version);
     ex.undo(); seen.add(ex.version);
+    ex.edit(start()); seen.add(ex.version);
     ex.load(start()); seen.add(ex.version);
-    expect(seen.size).toBe(6);
+    expect(seen.size).toBe(7);
   });
 });

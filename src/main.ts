@@ -45,6 +45,8 @@ import type { ExplorerAction } from './genome/explorer';
 import { Scout } from './genome/scout';
 import type { ScoutPick } from './genome/scout';
 import { analyzeSound } from './analysis/fractal';
+import { SettingsPage } from './ui/settings';
+import { samePoint } from './ui/settingsModel';
 
 const MORPH_SECONDS = 2.0;
 const UNDO_MORPH_SECONDS = 0.8;
@@ -85,6 +87,8 @@ const detailsCloseBtn = el('detailsCloseBtn', HTMLButtonElement);
 const likeBtn = el('likeBtn', HTMLButtonElement);
 const dislikeBtn = el('dislikeBtn', HTMLButtonElement);
 const surpriseBtn = el('surpriseBtn', HTMLButtonElement);
+const settingsBtn = el('settingsBtn', HTMLButtonElement);
+const settingsSoundBtn = el('settingsSoundBtn', HTMLButtonElement);
 
 // Slider ranges per visual card, for the LFO matrix's effectiveParams clamp.
 const VISUAL_RANGES: Record<string, Record<string, readonly [number, number]>> = {};
@@ -327,6 +331,7 @@ function boot(): void {
       case 'dislike': return '👎 back to the last liked point, trying elsewhere';
       case 'surprise': return '🎲 jumped somewhere new';
       case 'undo': return '↩ undone';
+      case 'edit': return '⚙ set by hand in Settings';
       case 'load': return 'loaded';
     }
   }
@@ -373,7 +378,7 @@ function boot(): void {
     if (scoutTimer !== null) clearTimeout(scoutTimer);
     scoutTimer = setTimeout(() => {
       scoutTimer = null;
-      if (!audio.running || !morphDone) return;
+      if (!audio.running || !morphDone || settings.isOpen) return;
       document.body.dataset.scout = '0/0';
       scout.prepare(explorer, masterGain);
     }, SCOUT_DELAY_MS);
@@ -699,7 +704,114 @@ function boot(): void {
   helpCloseX.addEventListener('click', closeHelp);
   helpBox.addEventListener('click', (e) => { if (e.target === helpBox) closeHelp(); });
 
+  // --- ⚙ Settings --------------------------------------------------------
+  // A full-screen page with every parameter of the point (ui/settings.ts).
+  // It edits a copy of the point, which is also `state` while it is open:
+  // sound changes go to the engine at once, the frame loop stops (so the
+  // picture shows its changes on close), and closing commits the point as
+  // one undoable step — a jump, not a morph: the sound is already there.
+  const settings = new SettingsPage({
+    root: el('settings', HTMLElement),
+    tabAudio: el('tabAudio', HTMLButtonElement),
+    tabVideo: el('tabVideo', HTMLButtonElement),
+    paneAudio: el('paneAudio', HTMLDivElement),
+    paneVideo: el('paneVideo', HTMLDivElement),
+    closeBtn: el('settingsCloseBtn', HTMLButtonElement),
+    soundBtn: settingsSoundBtn,
+  }, {
+    onSound: pushSettingsSound,
+    onVolume: (v) => {
+      masterGain = v;
+      volume.value = String(v);
+      audio.setMasterGain(v);
+    },
+    onSoundToggle: () => {
+      if (audio.running) void stopAudio();
+      else void startAudio();
+    },
+    onClose: closeSettings,
+  });
+
+  // A slider drag fires far more often than the engine needs: at most one
+  // push per AUDIO_PUSH_INTERVAL (as a morph does), and always the last one.
+  let soundEditTimer: ReturnType<typeof setTimeout> | null = null;
+  let soundEditAt = -Infinity;
+  let soundEdits = 0;
+  function flushSettingsSound(): void {
+    if (soundEditTimer !== null) clearTimeout(soundEditTimer);
+    soundEditTimer = null;
+    soundEditAt = performance.now();
+    if (!audio.running) return;
+    audio.applyState({ masterGain, fx: state.audio.fx, formulas: state.audio.formulas, mod: state.mod });
+    document.body.dataset.soundEdits = String(++soundEdits); // for scripts/smoke.mjs
+  }
+  function pushSettingsSound(): void {
+    const wait = AUDIO_PUSH_INTERVAL * 1000 - (performance.now() - soundEditAt);
+    if (wait <= 0) flushSettingsSound();
+    else if (soundEditTimer === null) soundEditTimer = setTimeout(flushSettingsSound, wait);
+  }
+
+  function openSettings(): void {
+    if (settings.isOpen) return;
+    // A morph in flight lands now: the page edits the point it was heading to.
+    if (!morphDone) {
+      live = morphTo;
+      morphFrom = morphTo;
+      morphDone = true;
+      applyToEngines(decodeGenome(live), true);
+    }
+    stopScout(); // its candidates are about the point being edited away
+    endStroke();
+    state = decodeGenome(explorer.current);
+    settings.open(state, masterGain, audio.running);
+    document.body.dataset.settings = 'open';
+  }
+
+  function closeSettings(): void {
+    if (!settings.isOpen) return;
+    if (soundEditTimer !== null) flushSettingsSound();
+    settings.hide();
+    delete document.body.dataset.settings;
+    settingsBtn.focus();
+    const before = decodeGenome(explorer.current);
+    if (samePoint(state, before)) {
+      state = before;
+      onSettled(); // a morph landed by openSettings() is saved and scouted here
+    } else {
+      const prev = explorer.current;
+      explorer.edit(encodeGenome(state));
+      history.replaceState(null, '', cleanUrl(location.href));
+      stepCount++;
+      presetName = undefined;
+      setPointRef('');
+      live = explorer.current;
+      morphFrom = live;
+      morphTo = live;
+      morphDone = true;
+      applyToEngines(decodeGenome(live), true);
+      refreshUndo();
+      setStatus(`${actionLabel('edit')} · step ${stepCount}\n${describeChange(prev, explorer.current)}`);
+      onSettled();
+    }
+    resumeLoop();
+  }
+
+  settingsBtn.addEventListener('click', openSettings);
+
   // --- audio -------------------------------------------------------------
+  function showSound(running: boolean): void {
+    for (const b of [audioBtn, settingsSoundBtn]) {
+      setBtnText(b, running ? '⏹ Sound' : '▶ Sound');
+      b.classList.toggle('running', running);
+    }
+    settings.setSoundRunning(running);
+  }
+
+  function soundBusy(busy: boolean): void {
+    audioBtn.disabled = busy;
+    settingsSoundBtn.disabled = busy;
+  }
+
   async function startAudio(): Promise<void> {
     if (audio.running) return;
     // iOS: the silent <audio> has to start SYNCHRONOUSLY inside the gesture,
@@ -707,17 +819,16 @@ function boot(): void {
     // See audio/iosUnlock.ts — this must stay the first statement here.
     // (body[data-ios-unlock] is how scripts/smoke.mjs sees it happened.)
     void iosUnlock.play().then((ok) => { document.body.dataset.iosUnlock = ok ? '1' : 'refused'; });
-    audioBtn.disabled = true;
+    soundBusy(true);
     try {
       await audio.start({ masterGain, fx: state.audio.fx, formulas: state.audio.formulas, mod: state.mod });
     } catch (err) {
       setStatus(`audio failed: ${err instanceof Error ? err.message : String(err)}`);
-      audioBtn.disabled = false;
+      soundBusy(false);
       return;
     }
-    audioBtn.disabled = false;
-    setBtnText(audioBtn, '⏹ Sound');
-    audioBtn.classList.add('running');
+    soundBusy(false);
+    showSound(true);
     const analyser = audio.analyser;
     if (analyser) {
       timeDomain = new Float32Array(analyser.fftSize);
@@ -737,8 +848,7 @@ function boot(): void {
     await audio.stop();
     tracker = null;
     features = { ...SILENT_FEATURES };
-    setBtnText(audioBtn, '▶ Sound');
-    audioBtn.classList.remove('running');
+    showSound(false);
   }
 
   audioBtn.addEventListener('click', () => {
@@ -752,6 +862,12 @@ function boot(): void {
   });
 
   document.addEventListener('keydown', (e) => {
+    // The settings page owns the keyboard: its sliders take the arrows, and
+    // no 👍/👎 may fire behind it.
+    if (settings.isOpen) {
+      if (e.key === 'Escape') { e.preventDefault(); closeSettings(); }
+      return;
+    }
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
     if (!helpBox.hidden) { if (e.key === 'Escape' || e.key === 'Enter') closeHelp(); return; }
     if (!pointsPanel.hidden) { if (e.key === 'Escape') closePoints(); return; }
@@ -837,13 +953,30 @@ function boot(): void {
     expoWindowStart = now;
   }
 
+  // The loop stops itself while ⚙ Settings is open (the picture is paused
+  // there by design, PLAN.md #28); resumeLoop() starts it again.
+  let loopRunning = false;
+  function resumeLoop(): void {
+    if (PAUSED || loopRunning) return;
+    loopRunning = true;
+    lastFrame = 0;
+    document.body.dataset.loop = 'running';
+    requestAnimationFrame(loop);
+  }
+
   function loop(): void {
+    if (settings.isOpen) {
+      loopRunning = false;
+      document.body.dataset.loop = 'paused';
+      return;
+    }
     tickMorph();
     const now = performance.now() / 1000;
     const since = lastFrame > 0 ? now - lastFrame : 0;
     const dt = lastFrame > 0 ? Math.min(0.25, since) : 1 / 60;
+    // the first frame after a start or a pause has no interval to measure
+    if (lastFrame > 0) tune(since * 1000);
     lastFrame = now;
-    tune(since * 1000);
 
     const analyser = audio.analyser;
     if (analyser && tracker) {
@@ -935,7 +1068,7 @@ function boot(): void {
   try { helpShown = localStorage.getItem(HELP_SHOWN_KEY) === '1'; } catch { /* private mode */ }
   if (!helpShown) openHelp();
   if (PAUSED) document.body.dataset.paused = '1';
-  else requestAnimationFrame(loop);
+  else resumeLoop();
   document.body.dataset.ready = '1'; // readiness signal for scripts/*.mjs
 }
 

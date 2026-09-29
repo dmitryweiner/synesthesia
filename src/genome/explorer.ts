@@ -4,7 +4,9 @@
 //   dislike  — return to the anchor, step elsewhere (avoiding the rejected
 //              dimensions) with a larger spread;
 //   surprise — jump near a given genome (a random preset), reset the search;
-//   undo     — pop the last change (bounded history).
+//   undo     — pop the last change (bounded history);
+//   edit     — a point set by hand in ⚙ Settings: one undoable step, and the
+//              new anchor (the user said "this" as plainly as a 👍 can).
 // Pure bookkeeping over genome/evolve.ts; the rng is injected.
 // proposeLike/proposeDislike preview what a press would produce without
 // committing (the scout scores several of them in the background), and
@@ -16,7 +18,7 @@ import { GENES } from './genes';
 import type { Genome } from './codec';
 import { diffDims, mutate, repair } from './evolve';
 
-export type ExplorerAction = 'load' | 'like' | 'dislike' | 'surprise' | 'undo';
+export type ExplorerAction = 'load' | 'like' | 'dislike' | 'surprise' | 'undo' | 'edit';
 
 export interface ExplorerOptions {
   rng?: Rng;
@@ -144,6 +146,20 @@ export class Explorer {
     this.anchor = [...this.current];
     this.sigma = this.sigma0;
     this.lastAction = 'surprise';
+    this.version++;
+    return this.current;
+  }
+
+  /**
+   * A point set by hand (⚙ Settings): undoable, and the anchor from now on.
+   * Not repaired — no formula at all, or a coupling below the floor, is what
+   * the user chose; the next 👍/👎 repairs as usual.
+   */
+  edit(g: Genome): Genome {
+    this.push();
+    this.current = [...g];
+    this.anchor = [...g];
+    this.lastAction = 'edit';
     this.version++;
     return this.current;
   }

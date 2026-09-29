@@ -62,11 +62,22 @@ you don't, and the search follows.
   status line says so when it isn't there. The current point survives a
   reload on its own, and old long `#s=…` links still open.
 
+**⚙ Settings — for the curious.** A full-screen page with every parameter
+of the current point, in two tabs. *Audio* is formula-synth's panel: the
+formula cards (up to 5 on at once), the effects chain with its one-module
+presets, the master volume and the LFO routes to sound. *Video* is
+chromaflux's: the reaction, field-variation, flow and palette cards, the
+sound → image links and the LFO routes to the picture. The 4 LFOs are
+shared, so both tabs show them. Sound changes are heard as you make them;
+the picture pauses while the page is open and shows your changes when it
+closes. Closing with changes is one step (↩ Undo takes it back, and the
+next 👍 continues from what you set); Esc closes it too.
+
 **Touch or drag the picture** and it answers the way it answers the music:
 new growth under your finger and a ripple spreading out from it — the same
 reaction an onset in the sound produces.
 
-Keys: ← 👎 · → 👍 · ↑ 🎲 · Backspace ↩ · Space ▶ sound.
+Keys: ← 👎 · → 👍 · ↑ 🎲 · Backspace ↩ · Space ▶ sound · Esc closes a panel.
 
 How big it renders is **measured, not guessed**: the first frames of the
 real loop walk up a quality ladder (`src/sim/quality.ts`) and stop at the

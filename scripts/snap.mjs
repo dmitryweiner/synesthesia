@@ -8,11 +8,13 @@
 //                         [--reseed] [--stroke x0,y0,x1,y1]
 //                                                  # restart the pattern, then drag across
 //                                                  # the canvas (fractions of it)
+//                         [--settings audio|video] [--scroll px]
+//                                                  # open ⚙ Settings on that tab, scroll its pane
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { parseFlags, startServer, launchBrowser, captureErrors, openApp, withRes } from './lib.mjs';
 
-const { flags } = parseFlags(process.argv.slice(2), ['out', 'preset', 'hash', 'wait', 'like', 'dislike', 'width', 'height', 'res', 'stroke']);
+const { flags } = parseFlags(process.argv.slice(2), ['out', 'preset', 'hash', 'wait', 'like', 'dislike', 'width', 'height', 'res', 'stroke', 'settings', 'scroll']);
 if (!flags.has('out')) {
   console.error('usage: node scripts/snap.mjs --out <path> [--preset N] [--hash token] [--wait ms] '
     + '[--sound] [--like N] [--dislike N] [--details] [--help] [--width px] [--height px] [--preview]');
@@ -45,6 +47,13 @@ if (flags.has('stroke')) {
   await page.mouse.up();
 }
 if (flags.has('details')) await page.locator('#detailsBtn').click();
+if (flags.has('settings')) {
+  await page.locator('#settingsBtn').click();
+  const tab = flags.get('settings') === 'video' ? 'Video' : 'Audio';
+  await page.locator(`#tab${tab}`).click();
+  const scroll = Number(flags.get('scroll') ?? 0);
+  if (scroll) await page.locator(`#pane${tab}`).evaluate((n, px) => { n.scrollTop = px; }, scroll);
+}
 await page.waitForTimeout(Number(flags.get('wait')) || 3000);
 
 const out = flags.get('out');

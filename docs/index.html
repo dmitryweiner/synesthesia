@@ -6,8 +6,8 @@
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <meta name="theme-color" content="#0d1117" />
     <title>Synesthesia — sound &amp; image, steered by you</title>
-    <script type="module" crossorigin src="./assets/index-DKaTmsBD.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-DLg50X22.css">
+    <script type="module" crossorigin src="./assets/index-DEAeflqO.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-FZWaLdGc.css">
   </head>
   <body>
     <div id="app">
@@ -21,6 +21,7 @@
         <span class="tb-spacer"></span>
         <button id="saveBtn" class="tb-btn" title="Save this point in your browser">💾 Save</button>
         <button id="shareBtn" class="tb-btn" title="Copy a short link to this point">🔗 Share</button>
+        <button id="settingsBtn" class="tb-btn" title="Settings — every parameter of this point, sound and picture">⚙ Settings</button>
         <button id="detailsBtn" class="tb-btn" title="Show what this point is made of">ⓘ Details</button>
         <button id="helpBtn" class="tb-btn" title="How it works">?</button>
       </header>
@@ -60,6 +61,7 @@
               <li><b>🎲 Surprise</b> — jump near a random built-in preset.</li>
               <li><b>↩ Undo</b> — revert the last change (up to 5).</li>
               <li><b>💾 Save</b> keeps the point in this browser — saved points sit at the top of the list, and <b>🗑</b> removes the selected one. <b>🔗 Share</b> copies a short link. The current point also survives a page reload.</li>
+              <li><b>⚙ Settings</b> — for the curious: every parameter of the point, sound and picture. Sound changes are heard at once; the picture pauses and shows your changes when you close the settings. Closing counts as one step (↩ Undo takes it back).</li>
             </ul>
             <p>Sound and image share the same slow LFOs, and the picture listens: it breathes with loudness swells, flashes and sprouts new growth (with a ripple) on every hit, and bass / mid / treble tint its dark / mid / light tones. Press <b>▶ Sound</b> to start audio (browsers need a click for that).</p>
             <p><b>Touch or drag the picture</b> and it answers the same way it answers the music — new growth under your finger and a ripple spreading out from it.</p>
@@ -69,6 +71,19 @@
           </div>
         </div>
       </main>
+      <section id="settings" hidden aria-label="Settings">
+        <header id="settingsBar">
+          <div id="settingsTabs" role="tablist">
+            <button id="tabAudio" class="settings-tab" type="button" role="tab" aria-selected="true" aria-controls="paneAudio">🔊 Audio</button>
+            <button id="tabVideo" class="settings-tab" type="button" role="tab" aria-selected="false" aria-controls="paneVideo">🎨 Video</button>
+          </div>
+          <span class="tb-spacer"></span>
+          <button id="settingsSoundBtn" class="tb-btn primary" type="button" title="Start / stop sound">▶ Sound</button>
+          <button id="settingsCloseBtn" class="tb-btn" type="button" title="Close the settings (Esc)">✕ Close</button>
+        </header>
+        <div id="paneAudio" class="settings-pane" role="tabpanel" aria-labelledby="tabAudio"></div>
+        <div id="paneVideo" class="settings-pane" role="tabpanel" aria-labelledby="tabVideo" hidden></div>
+      </section>
     </div>
   </body>
 </html>
