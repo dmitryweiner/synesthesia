@@ -1,7 +1,8 @@
 # Moving the web app onto the shared core — plan & decisions
 
 *Status: decisions agreed with the user on 2026-10-05; phase 0 built on
-branch `core` (2026-10-05), its gate waits for the phones.*
+branch `core` (2026-10-05); its Android gate failed → C12 (cheaper
+generators in the core), then re-measure.*
 
 The web app was the first home of Synesthesia and is still the
 specification: [synesthesia-core](../synesthesia-core/) dumps its presets,
@@ -133,6 +134,21 @@ C11. **`presetName` → `preset_name` is not part of this migration.** The
     apps (old `#s=` tokens and D1 points keep being read; the id question is
     decided then).
 
+C12. **The core's generators are made cheaper; their golden takes may move
+    within −100 dB** (agreed 2026-10-05, after phase 0's gate). On an
+    Android phone (Chrome 154, 8 cores) the heaviest preset took 13 % of the
+    budget as a batch but ~50 % live (the audio thread runs on a slow core;
+    drawing does not change it), and at 3× the work the thread stalled (22
+    gaps > 50 ms, up to 176 ms) — ~2× of headroom instead of the gate's 3×.
+    A native profile of the heaviest presets: generators 74 % (Shepard's
+    per-octave `exp2`/`log2`/`exp` and Additive's 2·N `sin` per sample),
+    the FX chain 16 %, the analyser's FFT 8 %. So the generators are
+    rewritten for speed (recurrences, analytic logs, no per-octave
+    transcendental where an identity gives it), and the golden comparison
+    for a rewritten generator is "worst difference ≤ 1e-5" (−100 dBFS)
+    instead of 1e-6. Every other generator stays at 1e-6; the takes stay
+    frozen. The gate is re-measured on the phone afterwards.
+
 Unchanged by all of the above: the `AppState` v1 shape and the gene order;
 localStorage keys and formats (`synesthesia_library_v1`, the last point);
 `#s=` and `?presetId=` links; the points Worker's API and D1.
@@ -168,7 +184,7 @@ table updated.
 
 | phase | | state |
 |---|---|---|
-| 0 | `syn-wasm` scaffold + the performance gate | built; gate passed on the Mac, **phones pending** |
+| 0 | `syn-wasm` scaffold + the performance gate | built; Android gate failed (~2× headroom) → C12, re-measure after |
 | 1 | Freeze the TS behaviour into core fixtures; core catches up | — |
 | 2 | The core becomes the specification | — |
 | 3 | Sound: the core engine in the AudioWorklet | — |
@@ -263,8 +279,8 @@ LAN). Results, worklet thread, 48 kHz:
 |---|---|---|---|---|---|
 | MacBook (M-series, 10 cores) | headless Chromium, SwiftShader picture 30 fps at rung 2 | Fractal garden 6.3 % / 6.3 % (16× realtime); lightest 1.1 % | 22.6 % / 6.2 % | 0 / 0 | pass |
 | Android 10, 8 cores (first bench, no stress phase) | Chrome 154, picture 60 fps at rung 2 (577×1080, grid 205×384) | Loom & copper 13.0 % (7.7×); lightest 2.1 % | — / 43.7 % | 0 / — | 44 % > 35 % by the old reading; rerun |
-| Android | Chrome | | | | pending (rerun) |
-| iPhone | Safari | | | | pending |
+| Android 10, 8 cores | Chrome 154, picture 60 fps at rung 2 | Fractal garden 12.9 % / 13.1 % (7.8×); lightest 2.1 % | 51.3 % / 48.3 % | 0 / 0 by Chrome's counter, but 22 gaps > 50 ms (max 176 ms) at 3× | **fail** → C12 |
+| iPhone | Safari | | | | not available to the user |
 
 `-C target-feature=+simd128` was tried: the same within ±3 % (node, all 15
 presets, twice) — the DSP is per-sample and scalar, there is nothing for
