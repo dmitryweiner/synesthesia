@@ -623,6 +623,13 @@ them as 1-…).
       chromaflux's resolution select and PNG export; Veins/Pour/Brush stay
       out (#2).
 
+## Decisions on moving onto the shared core (agreed with the user, 2026-10-05)
+
+29. **The web app moves onto synesthesia-core**, sound included, and the
+    core becomes the specification. The decisions (C1–C11) and the phases
+    are in **PLAN-CORE.md**. Until the swap, `main` gets no model changes
+    (C7).
+
 ## Architecture
 
 ```

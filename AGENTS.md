@@ -10,7 +10,9 @@ image (Gray–Scott reaction-diffusion, ported from
 search with 👍/👎. Decisions agreed with the user live in **PLAN.md** — read
 it before changing behavior. Proposals that are *not* agreed yet (sound
 mechanics, missing measurements, with the numbers behind them) live in
-**PLAN-IMPROVEMENTS.md**. README.md is the human-facing spec. UI, docs
+**PLAN-IMPROVEMENTS.md**. The move onto the shared Rust core
+([../synesthesia-core](../synesthesia-core/)) is planned in
+**PLAN-CORE.md**. README.md is the human-facing spec. UI, docs
 and code comments are in English.
 
 ## Commands
