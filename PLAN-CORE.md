@@ -2,7 +2,7 @@
 
 *Status: decisions agreed with the user on 2026-10-05; phase 0 built on
 branch `core` (2026-10-05); phase 0 done (the Android gate passed after C12, cheaper generators in
-the core); phase 1 in progress.*
+the core); phase 1 done but for the D1 export.*
 
 The web app was the first home of Synesthesia and is still the
 specification: [synesthesia-core](../synesthesia-core/) dumps its presets,
@@ -196,7 +196,7 @@ table updated.
 | phase | | state |
 |---|---|---|
 | 0 | `syn-wasm` scaffold + the performance gate | **done** 2026-10-05: Android passes after C12 (heaviest 6.7 % batch, 3× clean); iPhone not measured |
-| 1 | Freeze the TS behaviour into core fixtures; core catches up | — |
+| 1 | Freeze the TS behaviour into core fixtures; core catches up | done except the D1 export (needs the user) |
 | 2 | The core becomes the specification | — |
 | 3 | Sound: the core engine in the AudioWorklet | — |
 | 4 | Session and scout | — |
@@ -325,6 +325,58 @@ Everything the TypeScript knows that the core does not yet pin, captured
 - **Shaders** moved to `synesthesia-core/shaders/` (C10), with a check that
   they are identical to this repository's until the swap.
 
+**Done (2026-10-05, core `f372544`…`2ed3c01`).** What was frozen, and what
+it turned up:
+- **Points** (`fixtures/points.json`, `scripts/dump-points.mjs`):
+  `syn_core::point::{sanitize, canonical_json, point_id}` reproduce the
+  TypeScript on 283 inputs — presets, the default, 40 random genomes, 160
+  mutated points (wrong types, out-of-range and huge numbers, deleted and
+  unknown keys, replaced branches), 30 broken LFO/route sets, 25 old shapes
+  (no shimmer, no explicit couplings, no `mod`, `preset_name`, a name that
+  needs escaping), 12 non-points — **byte for byte, ids included**. Two
+  things had to be right for that: numbers written as `JSON.stringify`
+  writes them (`55`, not serde's `55.0`; `1e+21`; `-0` → `0`), and
+  serde_json's `float_roundtrip` (its default float parse was off by an
+  ulp on a few % of the values).
+  - **Not done: the production D1 export.** Reading production was refused
+    in auto mode; the user runs it (Node ≥ 22 for wrangler):
+    `npx wrangler d1 execute synesthesia-presets --remote --json --command "SELECT id, body FROM points"`
+    in `cloud/`, then the bodies go to `node scripts/dump-points.mjs
+    --extra <bodies.json>` in the core, whose test then also checks that
+    each stored body re-sanitizes to itself with the same id. Before the
+    TS is deleted (phase 9). Whether real users' point names may sit in a
+    public repository is the user's call.
+- **What changed** (`fixtures/changes.json`): 120 genome pairs → the same
+  genes, directions and status line (`syn_session::describe_change`).
+- **FX presets** → `assets/fx-presets.json` + `syn_core::fx_presets`.
+- **Onsets** (`syn-core/tests/onsets.rs`): the web test's pipeline in the
+  core gives the TypeScript's own hit counts on eight presets, its
+  thresholds hold, and the engine through its FX still fires on bells and
+  not on drones. Found and fixed: the core's analyser waited for a full
+  2048-sample window before its first frame, where an AnalyserNode (and
+  the TS emulation) start from zeros — that shifted the detector's warm-up
+  and gave Aurora two extra hits. **Open for phase 9:** through its own
+  FX the engine fires more than the browser's graph did on the same 16 s
+  (Bell spots 11 vs 7, Cave coral 33 vs 12, Aurora 6 vs 1; dry, the two
+  agree) — the picture will react more often; look at it in the
+  listening pass.
+- **Shaders** → `synesthesia-core/shaders/`, shipped inside the package by
+  `build-core.mjs`; `tests/coreShaders.test.ts` keeps `src/sim/shaders/`
+  identical until the swap.
+- **Analysis** (`fixtures/analysis.json`, `scripts/dump-analysis.mjs`):
+  character, clicks and the log spectrogram ported and checked on every
+  preset's dry mix (character to 1e-6, clicks exactly, the spectrogram to
+  1e-3 dB above −90 dB). Chaotic formulas are left out of that mix: the
+  logistic map turns a last-bit LFO difference into a different signal
+  after ~17 s (0.24 apart) — known, and watched by golden/'s
+  `chaotic_formulas_stay_in_family`.
+- **`picture.ts` moves** (the open question): it is pure on the V field, so
+  `syn_core::analysis::picture` has it; the web's `--picture` keeps reading
+  its GPU field and will call the core's metric (phase 8).
+- Not ported yet (C6, phase 8 with the bench binary): the onset and
+  preset-switch benches, `--configs`, `--repeat`, `--ref`, `--wav`, PNG
+  output.
+
 ### 2. The core becomes the specification (C2)
 
 - `assets/presets.json`, `schema.json`, `genomes.json` become hand-edited
@@ -419,5 +471,3 @@ The core's TODO item, done once in the core.
   (C7): GitHub Pages serves one site. Options: a CI artifact served
   locally, or a separate preview host — decide in phase 8, before phase 9.
 - The scout's render configuration (phase 4, by measurement).
-- Whether `src/analysis/picture.ts` moves to the core or stays (phase 1:
-  depends on whether it needs the GPU's state).
