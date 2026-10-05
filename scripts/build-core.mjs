@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Builds the core's wasm package (synesthesia-core/syn-wasm) into
-// src/core/pkg/ — PLAN-CORE.md C3/C9. The web app pins a core revision in
+// Builds the core's wasm package (synesthesia-core/syn-wasm), with the
+// core's shaders beside it, into src/core/pkg/ — PLAN-CORE.md C3/C9. The web app pins a core revision in
 // package.json ("synesthesiaCore.rev"); the package is built from exactly
 // that revision and never committed. Needs Rust with the wasm32 target and
 // wasm-pack (`rustup target add wasm32-unknown-unknown`,
@@ -15,7 +15,7 @@
 // checkout ../synesthesia-core when it has that commit (fast, and works for
 // a commit not pushed yet), else from the repository in package.json.
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
+import { cpSync, existsSync, readFileSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
@@ -36,6 +36,8 @@ function build(coreDir, stamp, targetDir) {
   rmSync(OUT, { recursive: true, force: true });
   if (targetDir) env.CARGO_TARGET_DIR = targetDir; // one cache for every pinned rev
   run('wasm-pack', ['build', 'syn-wasm', '--target', 'web', '--release', '--no-pack', '--out-dir', OUT], coreDir);
+  // the picture's shaders travel with the package (PLAN-CORE.md C10)
+  cpSync(join(coreDir, 'shaders'), join(OUT, 'shaders'), { recursive: true });
   writeFileSync(STAMP, `${stamp}\n`);
   console.log(`syn-wasm ${stamp} → src/core/pkg`);
 }
