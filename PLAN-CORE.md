@@ -1,6 +1,7 @@
 # Moving the web app onto the shared core — plan & decisions
 
-*Status: decisions agreed with the user on 2026-10-05; no phase started.*
+*Status: decisions agreed with the user on 2026-10-05; phase 0 built on
+branch `core` (2026-10-05), its gate waits for the phones.*
 
 The web app was the first home of Synesthesia and is still the
 specification: [synesthesia-core](../synesthesia-core/) dumps its presets,
@@ -167,7 +168,7 @@ table updated.
 
 | phase | | state |
 |---|---|---|
-| 0 | `syn-wasm` scaffold + the performance gate | — |
+| 0 | `syn-wasm` scaffold + the performance gate | built; gate passed on the Mac, **phones pending** |
 | 1 | Freeze the TS behaviour into core fixtures; core catches up | — |
 | 2 | The core becomes the specification | — |
 | 3 | Sound: the core engine in the AudioWorklet | — |
@@ -207,6 +208,51 @@ table updated.
     view).
 - Bundle size of `syn-wasm` (gzip) written down; it matters for the first
   load on a phone and for the Worker (phase 7).
+
+**Done (2026-10-05).** synesthesia-core `dc1457f` adds `syn-wasm`
+(`AudioCore`: the player for one worklet, presets, the version); this
+repository pins it in `package.json` (`synesthesiaCore.rev`) and builds it
+with `npm run core` (`scripts/build-core.mjs`) into `src/core/pkg/`,
+gitignored. The worklet is `src/worklet/core.ts`, its main-thread half
+`src/core/audio.ts`, the protocol `src/core/protocol.ts`.
+
+How the mechanics came out (`tests/coreWorklet.test.ts` pins each):
+- **The module** is compiled on the main thread and handed over in
+  `processorOptions`; where a browser refuses to clone a `Module` (a
+  `DataCloneError` from the node's constructor), the bytes go instead and
+  the worklet compiles them (`initSync` does). Both paths measured in
+  Chromium; Safari's is what the iPhone run will say (the page prints which
+  one it took).
+- **`TextDecoder`**: wasm-bindgen's glue constructs one when it is
+  evaluated, so a scope without it fails at import. Decided: a ~30-line
+  UTF-8 decoder (`src/worklet/textPolyfill.ts`) installed only where the
+  global is missing, imported before the glue; `AudioCore` itself speaks
+  numbers and byte arrays only, so the decoder is reached only by a panic
+  message. No `TextEncoder` is needed (points go in as bytes, encoded on the
+  main thread).
+- **No allocation per quantum**: `render(n)` returns an offset into the
+  module's memory and the worklet keeps one `Float32Array` view onto it,
+  remade only when the memory grew — which a new point's parse can do once,
+  a quantum never does (the test runs 5 000 quanta and counts views).
+- **Load is timed with `Date.now()`** inside the worklet (`performance` is
+  not in its scope): 1 ms steps at random phases of a 2.7 ms quantum, so the
+  sum over a minute is unbiased. Underruns come from Chrome's
+  `AudioContext.playbackStats`; where a browser has none, process() calls
+  more than 50 ms apart are counted instead.
+- **Size**: `syn_wasm_bg.wasm` 650 KB, **187 KB gzip** (the whole model is
+  linked: presets, schema, genome). The worklet bundle is 5 KB.
+
+The gate's bench is `core-bench.html` (`npm run bench:core` headless;
+`npm run bench:serve` serves it over self-signed HTTPS to a phone on the
+LAN). Results, worklet thread, 48 kHz:
+
+| device | browser | heaviest preset (batch) | live, while drawing | underruns | verdict |
+|---|---|---|---|---|---|
+| MacBook (M-series, 10 cores) | headless Chromium, SwiftShader picture 30 fps at rung 2 | Fractal garden 6.3 % (16× realtime); lightest 1.1 % | 6.5 % over 60 s | 0 (max gap 6 ms) | pass |
+| mid-range Android | Chrome | | | | pending |
+| iPhone | Safari | | | | pending |
+
+The production bundle (`vite build`) measures the same (6.4 % / 6.2 %).
 
 ### 1. Freeze the TS behaviour; the core catches up
 

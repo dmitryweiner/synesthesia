@@ -9,3 +9,7 @@ shots/
 # the original brief, kept locally only
 PROMT.md
 .wrangler/
+
+# the core's wasm package, built from the pinned revision (scripts/build-core.mjs)
+src/core/pkg/
+.core/

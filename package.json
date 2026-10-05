@@ -4,27 +4,35 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "dev": "npm run core && vite",
+    "build": "npm run core && tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
-    "check": "tsc --noEmit && eslint . && vitest run",
-    "smoke": "node scripts/smoke.mjs",
+    "check": "npm run core && tsc --noEmit && eslint . && vitest run",
+    "smoke": "npm run core && node scripts/smoke.mjs",
     "snap": "node scripts/snap.mjs",
     "analyze": "node scripts/analyze.mjs",
     "check:cloud": "cd cloud && npm run check && npm test",
-    "deploy:cloud": "cd cloud && npx wrangler d1 migrations apply synesthesia-presets --remote && npx wrangler deploy"
+    "deploy:cloud": "cd cloud && npx wrangler d1 migrations apply synesthesia-presets --remote && npx wrangler deploy",
+    "core": "node scripts/build-core.mjs",
+    "bench:core": "npm run core && node scripts/core-bench.mjs",
+    "bench:serve": "npm run core && SYN_HTTPS=1 vite --host"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.1.1",
+    "@vitejs/plugin-basic-ssl": "^1.2.0",
     "eslint": "^10.5.0",
     "playwright": "^1.61.1",
     "typescript": "^5.6.3",
     "typescript-eslint": "^8.61.0",
     "vite": "^5.4.10",
     "vitest": "^2.1.4"
+  },
+  "synesthesiaCore": {
+    "repo": "https://github.com/dmitryweiner/synesthesia-core",
+    "rev": "dc1457ff203c4c0618678b32dec1e1a86a2acc77"
   }
 }

@@ -19,6 +19,14 @@ and code comments are in English.
 
 ```bash
 npm run check     # tsc --noEmit && eslint . && vitest run — after every change
+npm run core      # (branch `core`, PLAN-CORE.md) build syn-wasm at the rev pinned in
+                  # package.json into src/core/pkg/ (never committed); check/dev/
+                  # build/smoke run it first. Rust + wasm32 target + wasm-pack.
+                  # SYN_CORE_DIR=../synesthesia-core builds a working tree instead
+npm run bench:core  # phase 0 gate: each preset's share of the audio budget in the
+                  # worklet, then the heaviest live while the picture draws
+npm run bench:serve # HTTPS dev server on the LAN: open /core-bench.html on a phone
+                  # (self-signed: accept the warning). Stop it when done
 npm run smoke     # Playwright: boot, sound, 👍/👎/🎲/undo, every preset,
                   # ?preset=N, save+reload, share link in a 2nd tab, scout,
                   # ⚙ Settings (picture paused, sound heard, one undo step).

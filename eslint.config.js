@@ -3,7 +3,7 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['docs/**', 'node_modules/**', 'dist/**', 'scripts/**', '.claude/**', 'cloud/dist/**', 'cloud/.wrangler/**', 'cloud/test/**'],
+    ignores: ['docs/**', 'src/core/pkg/**', '.core/**', 'node_modules/**', 'dist/**', 'scripts/**', '.claude/**', 'cloud/dist/**', 'cloud/.wrangler/**', 'cloud/test/**'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
