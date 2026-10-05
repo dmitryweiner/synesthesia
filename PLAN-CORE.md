@@ -2,7 +2,7 @@
 
 *Status: decisions agreed with the user on 2026-10-05; phase 0 built on
 branch `core` (2026-10-05); phase 0 done (the Android gate passed after C12, cheaper generators in
-the core); phases 1–2 done (but for the D1 export); phase 3 next.*
+the core); phases 0–2 done; phase 3 next.*
 
 The web app was the first home of Synesthesia and is still the
 specification: [synesthesia-core](../synesthesia-core/) dumps its presets,
@@ -196,8 +196,8 @@ table updated.
 | phase | | state |
 |---|---|---|
 | 0 | `syn-wasm` scaffold + the performance gate | **done** 2026-10-05: Android passes after C12 (heaviest 6.7 % batch, 3× clean); iPhone not measured |
-| 1 | Freeze the TS behaviour into core fixtures; core catches up | done except the D1 export (needs the user) |
-| 2 | The core becomes the specification | done (Android commit not pushed yet) |
+| 1 | Freeze the TS behaviour into core fixtures; core catches up | done |
+| 2 | The core becomes the specification | done |
 | 3 | Sound: the core engine in the AudioWorklet | — |
 | 4 | Session and scout | — |
 | 5 | Picture | — |
@@ -338,14 +338,16 @@ it turned up:
   writes them (`55`, not serde's `55.0`; `1e+21`; `-0` → `0`), and
   serde_json's `float_roundtrip` (its default float parse was off by an
   ulp on a few % of the values).
-  - **Not done: the production D1 export.** Reading production was refused
-    in auto mode; the user runs it (Node ≥ 22 for wrangler):
-    `npx wrangler d1 execute synesthesia-presets --remote --json --command "SELECT id, body FROM points"`
-    in `cloud/`, then the bodies go to `node scripts/dump-points.mjs
-    --extra <bodies.json>` in the core, whose test then also checks that
-    each stored body re-sanitizes to itself with the same id. Before the
-    TS is deleted (phase 9). Whether real users' point names may sit in a
-    public repository is the user's call.
+  - **The production D1** (read-only export, 2026-10-05, 20 points, all
+    the user's): each sanitizes in the core exactly as in the TypeScript,
+    and every stored value survives. 17 of them gain fields the schema grew
+    after they were stored (`tanpura`, `bowl`, `delayShimmer`), so
+    re-sanitized they canonicalize to a new id — in the TypeScript too.
+    Their links keep working: the Worker serves a stored body by its id
+    and never recomputes it; only a re-share gets a new id. To refresh:
+    `wrangler d1 execute … --json --command "SELECT id, body FROM points"`
+    (Node ≥ 22, logged in), then `node scripts/dump-points.mjs --extra
+    <that file>` in the core, before the TypeScript is deleted.
 - **What changed** (`fixtures/changes.json`): 120 genome pairs → the same
   genes, directions and status line (`syn_session::describe_change`).
 - **FX presets** → `assets/fx-presets.json` + `syn_core::fx_presets`.
@@ -398,8 +400,7 @@ the codec's check moved to `fixtures/genomes.json` (frozen states with
 their TypeScript genomes), so editing a preset no longer breaks it. The
 core's README and AGENTS say it is the specification. synesthesia-android
 `sync-shaders.sh` reads the core's `shaders/` and its PLAN.md says the
-direction reversed — committed there locally (`git log -1` in that repo),
-**not pushed: waiting for the user's go**.
+direction reversed — pushed (`8eb503b`).
 
 ### 3. Sound (branch `core`)
 
