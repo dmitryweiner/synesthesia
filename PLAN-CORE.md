@@ -2,7 +2,7 @@
 
 *Status: decisions agreed with the user on 2026-10-05; phase 0 built on
 branch `core` (2026-10-05); its Android gate failed → C12 (cheaper
-generators in the core), then re-measure.*
+generators in the core) done; Android re-measure pending.*
 
 The web app was the first home of Synesthesia and is still the
 specification: [synesthesia-core](../synesthesia-core/) dumps its presets,
@@ -148,6 +148,17 @@ C12. **The core's generators are made cheaper; their golden takes may move
     for a rewritten generator is "worst difference ≤ 1e-5" (−100 dBFS)
     instead of 1e-6. Every other generator stays at 1e-6; the takes stay
     frozen. The gate is re-measured on the phone afterwards.
+    - **Done (core `2c60f92`):** the looser tolerance was not needed — the
+      takes still match to 1.6e-16. Additive by rotating unit vectors (4
+      transcendentals per sample instead of 2·N), Shepard by an analytic
+      log2 and a recurrent envelope, `hypot` → `sqrt(re²+im²)` in the
+      analyser (wasm has no fma; libm's `hypot` emulates one — 20 % of the
+      wasm render, invisible in the native profile), and `phase` wrapped at
+      1e5 instead of 1e9 (musl's `sin` goes multi-precision past ~1.6e6:
+      the wasm render grew 15 % over 20 minutes; now flat for an hour).
+      Wasm in node, % of a 48 kHz budget: Fractal garden 7.0 → 3.4, Loom &
+      copper 7.1 → 3.0, Overtone steppe 6.1 → 2.2; the heaviest is now
+      Tanpura halo, 3.7 → 3.3. Left: FX chain 19 %, `sin` 22 %, FFT 11 %.
 
 Unchanged by all of the above: the `AppState` v1 shape and the gene order;
 localStorage keys and formats (`synesthesia_library_v1`, the last point);
@@ -184,7 +195,7 @@ table updated.
 
 | phase | | state |
 |---|---|---|
-| 0 | `syn-wasm` scaffold + the performance gate | built; Android gate failed (~2× headroom) → C12, re-measure after |
+| 0 | `syn-wasm` scaffold + the performance gate | built; Android gate failed (~2× headroom) → C12 done (~2.1× cheaper), **Android re-measure pending** |
 | 1 | Freeze the TS behaviour into core fixtures; core catches up | — |
 | 2 | The core becomes the specification | — |
 | 3 | Sound: the core engine in the AudioWorklet | — |
@@ -280,6 +291,8 @@ LAN). Results, worklet thread, 48 kHz:
 | MacBook (M-series, 10 cores) | headless Chromium, SwiftShader picture 30 fps at rung 2 | Fractal garden 6.3 % / 6.3 % (16× realtime); lightest 1.1 % | 22.6 % / 6.2 % | 0 / 0 | pass |
 | Android 10, 8 cores (first bench, no stress phase) | Chrome 154, picture 60 fps at rung 2 (577×1080, grid 205×384) | Loom & copper 13.0 % (7.7×); lightest 2.1 % | — / 43.7 % | 0 / — | 44 % > 35 % by the old reading; rerun |
 | Android 10, 8 cores | Chrome 154, picture 60 fps at rung 2 | Fractal garden 12.9 % / 13.1 % (7.8×); lightest 2.1 % | 51.3 % / 48.3 % | 0 / 0 by Chrome's counter, but 22 gaps > 50 ms (max 176 ms) at 3× | **fail** → C12 |
+| MacBook, after C12 | headless Chromium | Tanpura halo 3.0 % / 3.1 % | 9.8 % / 1.9 % | 0 / 0 | pass |
+| Android, after C12 | Chrome | | | | pending |
 | iPhone | Safari | | | | not available to the user |
 
 `-C target-feature=+simd128` was tried: the same within ±3 % (node, all 15
