@@ -9,7 +9,11 @@ export type CoreCommand =
   | { type: 'fadeIn' | 'fadeOut' }
   | { type: 'stats'; reset?: boolean }
   /** Render `quanta` × 128 samples of `point` on a separate player, timed. */
-  | { type: 'bench'; point: Uint8Array; quanta: number };
+  | { type: 'bench'; point: Uint8Array; quanta: number }
+  /** A stress test: `count` more players of `point` render every quantum
+   *  beside the live one and are thrown away (0 removes them). Whether the
+   *  thread then keeps up is a measure of headroom that needs no clock. */
+  | { type: 'ballast'; point: Uint8Array; count: number };
 
 /** Load of the live render since the last reset, timed with Date.now(): its
  *  1 ms steps fall at random phases of the quantum, so a sum over many
@@ -25,6 +29,8 @@ export interface CoreStats {
   longGaps: number;
   /** How many times the output view was (re)made — 1 unless the memory grew. */
   views: number;
+  /** Ballast players rendering beside the live one. */
+  ballast: number;
   time: number;
 }
 

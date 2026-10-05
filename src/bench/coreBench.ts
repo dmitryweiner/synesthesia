@@ -4,17 +4,21 @@
 // 1. Every preset renders `batch` seconds on a separate player inside the
 //    worklet (the audio thread's own JIT and caches), timed: the share of
 //    the real-time budget one quantum takes.
-// 2. The heaviest preset plays live for `secs` while the real picture
-//    (SimEngine at a quality rung) draws; the worklet times every quantum
+// 2. The heaviest preset plays live for `idle` s with nothing drawn, then
+//    for `secs` while the real picture (SimEngine at a quality rung) draws,
+//    then is timed as a batch again while the picture still draws; the worklet times every quantum
 //    it renders, and the browser's playback stats count underruns where it
 //    has them (Chrome); elsewhere, gaps > 50 ms between quanta are counted.
-// Gate: ≤ 35 % of the budget for the heaviest preset, no underruns.
+// 3. Then it plays at `stress`× the work (ballast players of the same
+//    preset render beside it) while drawing, and the underruns are counted.
+// Gate: the heaviest preset ≤ 35 % of the budget as a batch (idle and while
+// drawing), and no underrun live or at 3× the work.
 //
 // scripts/core-bench.mjs drives this page headless and prints
 // window.coreBenchResult; on a phone, press Start and "Copy result".
 import init, { presetNames, presetStateJson, coreVersion } from '../core/pkg/syn_wasm.js';
 import { compileCore, createCoreNode, type CoreTransport } from '../core/audio';
-import { isCoreBenchResult, isCoreStats, type CoreCommand } from '../core/protocol';
+import { isCoreBenchResult, isCoreStats, type CoreCommand, type CoreStats } from '../core/protocol';
 import { PRESETS } from '../presets';
 import { SimEngine } from '../sim/engine';
 import { gridSize } from '../sim/grid';
@@ -28,6 +32,11 @@ const SECS = Number(q.get('secs') ?? 60);
 const BATCH = Number(q.get('batch') ?? 5);
 const RUNG = Math.min(QUALITY_LADDER.length - 1, Number(q.get('rung') ?? 2));
 const DRAW = q.get('draw') !== '0';
+const IDLE_SECS = Number(q.get('idle') ?? 20);
+/** The stress phase renders this many times the heaviest preset: 3× the
+ *  work ≈ the gate's 35 % of the budget, measured by underruns, not a clock. */
+const STRESS = Number(q.get('stress') ?? 3);
+const STRESS_SECS = Number(q.get('stressSecs') ?? 30);
 const TRANSPORT: CoreTransport = q.get('transport') === 'bytes' ? 'bytes' : 'module';
 const ONLY = q.get('preset'); // comma list: time only these
 
@@ -55,8 +64,10 @@ export interface CoreBenchReport {
   batchSeconds: number;
   presets: PresetTiming[];
   live: {
-    preset: string; seconds: number; percent: number; maxGapMs: number; longGaps: number;
+    preset: string; seconds: number; percent: number; idlePercent: number; batchDrawingPercent: number;
+    maxGapMs: number; longGaps: number;
     underruns: number | null; underrunMs: number | null; fps: number; canvas: string; grid: string;
+    stress: { times: number; seconds: number; underruns: number | null; longGaps: number; maxGapMs: number; keptUp: number };
   } | null;
   pass: boolean;
 }
@@ -174,38 +185,75 @@ async function run(): Promise<CoreBenchReport> {
   }
   const heaviest = report.presets.reduce((a, b) => (b.percent > a.percent ? b : a));
 
-  // 2. the heaviest one live, while the picture draws
-  statusEl.textContent = `live: ${heaviest.name} for ${SECS} s${DRAW ? ', drawing' : ''}…`;
+  // 2. the heaviest one live: first with nothing drawn, then while the
+  // picture draws (the gate's window), then timed as a batch while it still
+  // draws. A batch is immune to Date.now()'s 1 ms steps, so if it agrees
+  // with the live number, the picture's load really slows the audio thread
+  // (cores, clocks); if the live number is high on its own, the live timing
+  // is what is off.
   port.postMessage({ type: 'switchTo', point: pointOf(heaviest.index) } satisfies CoreCommand);
   port.postMessage({ type: 'fadeIn' } satisfies CoreCommand);
   await wait(1000);
+  const listen = async (secs: number, label: string): Promise<{ st: CoreStats; underruns: number | null; underrunMs: number | null; wallS: number }> => {
+    await reply(port, isCoreStats, { type: 'stats', reset: true });
+    const before = playbackStats(ctx);
+    const t0 = performance.now();
+    for (let s = 0; s < secs; s++) {
+      await wait(1000);
+      statusEl.textContent = `${label}: ${heaviest.name} ${s + 1}/${secs} s…`;
+    }
+    const st = await reply(port, isCoreStats, { type: 'stats' });
+    const wallS = (performance.now() - t0) / 1000;
+    const after = playbackStats(ctx);
+    return {
+      st, wallS,
+      underruns: before && after ? after.events - before.events : null,
+      underrunMs: before && after ? after.ms - before.ms : null,
+    };
+  };
+  const loadOf = (st: CoreStats): number => (st.renderMs / ((st.frames * 1000) / report.sampleRate)) * 100;
+  const idle = await listen(IDLE_SECS, 'live, not drawing');
   const picture = DRAW ? startPicture(heaviest.index) : null;
   await wait(1000);
-  await reply(port, isCoreStats, { type: 'stats', reset: true });
-  const before = playbackStats(ctx);
-  for (let s = 0; s < SECS; s++) {
-    await wait(1000);
-    statusEl.textContent = `live: ${heaviest.name} ${s + 1}/${SECS} s${DRAW ? ', drawing' : ''}…`;
-  }
-  const st = await reply(port, isCoreStats, { type: 'stats' });
-  const after = playbackStats(ctx);
+  const drawn = await listen(SECS, `live${DRAW ? ', drawing' : ''}`);
+  port.postMessage({ type: 'ballast', point: pointOf(heaviest.index), count: STRESS - 1 } satisfies CoreCommand);
+  await wait(500);
+  const stressed = await listen(STRESS_SECS, `stress ${STRESS}×${DRAW ? ', drawing' : ''}`);
+  port.postMessage({ type: 'ballast', point: pointOf(heaviest.index), count: 0 } satisfies CoreCommand);
+  await wait(500);
+  statusEl.textContent = `batch while drawing: ${heaviest.name}…`;
+  const batch = await reply(port, isCoreBenchResult, { type: 'bench', point: pointOf(heaviest.index), quanta });
   const pic = picture?.stop() ?? { fps: 0, canvas: '-', grid: '-' };
   port.postMessage({ type: 'fadeOut' } satisfies CoreCommand);
   await wait(200);
   await ctx.close();
-  const liveMs = (st.frames * 1000) / report.sampleRate;
+  const st = drawn.st;
   report.live = {
-    preset: heaviest.name, seconds: liveMs / 1000, percent: (st.renderMs / liveMs) * 100,
+    preset: heaviest.name, seconds: st.frames / report.sampleRate, percent: loadOf(st),
+    idlePercent: loadOf(idle.st), batchDrawingPercent: (batch.ms / budgetMs) * 100,
     maxGapMs: st.maxGapMs, longGaps: st.longGaps,
-    underruns: before && after ? after.events - before.events : null,
-    underrunMs: before && after ? after.ms - before.ms : null,
+    underruns: drawn.underruns, underrunMs: drawn.underrunMs,
     fps: pic.fps, canvas: pic.canvas, grid: pic.grid,
+    stress: {
+      times: STRESS, seconds: stressed.wallS, underruns: stressed.underruns,
+      longGaps: stressed.st.longGaps, maxGapMs: stressed.st.maxGapMs,
+      keptUp: stressed.st.frames / (stressed.wallS * report.sampleRate),
+    },
   };
   const l = report.live;
-  row(['live: ' + l.preset, fmt(l.percent), fmt(100 / Math.max(l.percent, 0.01))]);
+  row([`live, not drawing: ${l.preset}`, fmt(l.idlePercent), fmt(100 / Math.max(l.idlePercent, 0.01))]);
+  row([`live, drawing: ${l.preset}`, fmt(l.percent), fmt(100 / Math.max(l.percent, 0.01))]);
+  row([`batch, drawing: ${l.preset}`, fmt(l.batchDrawingPercent), fmt(100 / Math.max(l.batchDrawingPercent, 0.01))]);
   row([`gaps > 50 ms: ${l.longGaps} (max ${l.maxGapMs} ms)`, `underruns: ${l.underruns ?? 'n/a'}`, `${fmt(l.fps)} fps ${l.grid}`]);
-  report.pass = heaviest.percent <= GATE_PERCENT && l.percent <= GATE_PERCENT
-    && (l.underruns ?? 0) === 0 && l.longGaps === 0;
+  const x = l.stress;
+  row([`stress ${x.times}×: gaps > 50 ms ${x.longGaps} (max ${x.maxGapMs} ms)`, `underruns: ${x.underruns ?? 'n/a'}`, `kept up ${fmt(x.keptUp * 100)} %`]);
+  // The live percentages are reported, not gated: Date.now()'s steps are not
+  // at random phases of the quantum on every device, and an idle CPU runs
+  // the audio thread slowly (on the Mac: 22 % live idle vs 6 % in a batch).
+  // 3× the work without an underrun is the gate's "≤ 35 %" without a clock.
+  report.pass = heaviest.percent <= GATE_PERCENT && l.batchDrawingPercent <= GATE_PERCENT
+    && (l.underruns ?? 0) === 0 && l.longGaps === 0
+    && (x.underruns ?? 0) === 0 && x.longGaps === 0 && x.keptUp > 0.99;
   return report;
 }
 
@@ -217,7 +265,7 @@ startBtn.addEventListener('click', () => {
     window.coreBenchResult = r;
     statusEl.textContent = 'done';
     verdictEl.className = r.pass ? 'pass' : 'fail';
-    verdictEl.textContent = r.pass ? `PASS: ≤ ${GATE_PERCENT} % and no underruns` : `FAIL (gate: ≤ ${GATE_PERCENT} %, no underruns)`;
+    verdictEl.textContent = r.pass ? `PASS: ≤ ${GATE_PERCENT} %, no underruns at ${STRESS}× the work` : `FAIL (gate: ≤ ${GATE_PERCENT} %, no underruns at ${STRESS}× the work)`;
   }).catch((e: unknown) => {
     const error = e instanceof Error ? e.message : String(e);
     window.coreBenchResult = { pass: false, error };

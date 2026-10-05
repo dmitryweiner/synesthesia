@@ -113,6 +113,27 @@ describe('the core processor', () => {
     expect(s.time).toBeCloseTo((5000 * 128) / 48000, 9);
   });
 
+  it('renders ballast players beside the live one without touching its sound', async () => {
+    const point = await presetPoint(8);
+    const Ctor = await loadWorklet();
+    const plain = new Ctor({ processorOptions: { module: new WebAssembly.Module(WASM), point } });
+    const loaded = new Ctor({ processorOptions: { module: new WebAssembly.Module(WASM), point } });
+    loaded.port.onmessage?.({ data: { type: 'ballast', point, count: 2 } });
+    for (const p of [plain, loaded]) p.port.onmessage?.({ data: { type: 'fadeIn' } });
+    const a = quantum();
+    const b = quantum();
+    for (let i = 0; i < 300; i++) {
+      plain.process([], a);
+      loaded.process([], b);
+      expect(b[0][0]).toEqual(a[0][0]);
+    }
+    loaded.port.onmessage?.({ data: { type: 'stats' } });
+    expect(last(loaded.port.posted)).toMatchObject({ ballast: 2 });
+    loaded.port.onmessage?.({ data: { type: 'ballast', point, count: 0 } });
+    loaded.port.onmessage?.({ data: { type: 'stats' } });
+    expect(last(loaded.port.posted)).toMatchObject({ ballast: 0 });
+  });
+
   it('times a preset on a separate player without moving the live one', async () => {
     const point = await presetPoint(0);
     const Ctor = await loadWorklet();

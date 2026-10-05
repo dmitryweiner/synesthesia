@@ -22,7 +22,7 @@
     <div id="panel">
       <h3 style="margin: 0 0 8px">Core bench — syn-player in an AudioWorklet</h3>
       <p style="margin: 0 0 8px">Every preset is timed on the audio thread, then the heaviest one plays
-        live for a minute while the picture draws. Keep the screen on. Query: <code>?secs=60&amp;batch=5&amp;rung=2&amp;draw=1&amp;transport=module</code></p>
+        live: 20 s without the picture, a minute while it draws, 30 s at 3× the work while it draws, then one more timing. Keep the screen on. Query: <code>?secs=60&amp;idle=20&amp;batch=5&amp;rung=2&amp;draw=1&amp;stress=3&amp;transport=module</code></p>
       <button id="start">▶ Start</button><button id="copy" disabled>Copy result</button>
       <div id="status">idle</div>
       <h4 id="verdict"></h4>

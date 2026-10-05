@@ -32,6 +32,7 @@ class CoreProcessor extends AudioWorkletProcessor {
   private outBuffer: ArrayBufferLike | null = null;
   private stats: CoreStats = CoreProcessor.zeroStats();
   private lastStart = 0;
+  private ballast: AudioCore[] = [];
 
   constructor(options?: { processorOptions?: unknown }) {
     super();
@@ -47,7 +48,7 @@ class CoreProcessor extends AudioWorkletProcessor {
   }
 
   private static zeroStats(): CoreStats {
-    return { type: 'stats', quanta: 0, frames: 0, renderMs: 0, maxGapMs: 0, longGaps: 0, views: 0, time: 0 };
+    return { type: 'stats', quanta: 0, frames: 0, renderMs: 0, maxGapMs: 0, longGaps: 0, views: 0, ballast: 0, time: 0 };
   }
 
   private command(c: CoreCommand): void {
@@ -57,12 +58,23 @@ class CoreProcessor extends AudioWorkletProcessor {
       case 'fadeIn': this.core.fadeIn(); break;
       case 'fadeOut': this.core.fadeOut(); break;
       case 'stats': {
-        this.port.postMessage({ ...this.stats, time: this.core.time() });
+        this.port.postMessage({ ...this.stats, ballast: this.ballast.length, time: this.core.time() });
         if (c.reset) {
           const views = this.stats.views;
           this.stats = CoreProcessor.zeroStats();
           this.stats.views = views;
           this.lastStart = 0;
+        }
+        break;
+      }
+      case 'ballast': {
+        for (const b of this.ballast) b.free();
+        this.ballast = [];
+        for (let i = 0; i < c.count; i++) {
+          const b = AudioCore.create(sampleRate, c.point, 128);
+          if (!b) break;
+          b.fadeIn();
+          this.ballast.push(b);
         }
         break;
       }
@@ -87,6 +99,7 @@ class CoreProcessor extends AudioWorkletProcessor {
     const channels = outputs[0];
     const n = channels[0].length;
     const ptr = this.core.render(n);
+    for (const b of this.ballast) b.render(n);
     if (ptr !== this.outPtr || this.memory.buffer !== this.outBuffer || this.out.length !== n) {
       this.outBuffer = this.memory.buffer;
       this.outPtr = ptr;

@@ -234,11 +234,24 @@ How the mechanics came out (`tests/coreWorklet.test.ts` pins each):
   module's memory and the worklet keeps one `Float32Array` view onto it,
   remade only when the memory grew — which a new point's parse can do once,
   a quantum never does (the test runs 5 000 quanta and counts views).
-- **Load is timed with `Date.now()`** inside the worklet (`performance` is
-  not in its scope): 1 ms steps at random phases of a 2.7 ms quantum, so the
-  sum over a minute is unbiased. Underruns come from Chrome's
-  `AudioContext.playbackStats`; where a browser has none, process() calls
-  more than 50 ms apart are counted instead.
+- **Load is timed with `Date.now()`** inside the worklet: Chromium's
+  worklet scope has neither `performance` nor `TextDecoder` (probed). The
+  first bench assumed its 1 ms steps fall at random phases of a 2.7 ms
+  quantum, so a live sum would be unbiased. **It is not reliable**: on the
+  Mac the same preset reads 6 % as a batch and while drawing, but 22–25 %
+  live with nothing drawn (an idle CPU wakes the audio thread on a slow
+  core and/or in step with the millisecond); the Android phone read 13 % as
+  a batch and 44 % live while drawing, with no underrun. So live
+  percentages are reported, not gated. What the gate reads instead:
+  - batches (hundreds of ms each, immune to the step), idle **and** while
+    the picture draws;
+  - a **stress phase**: ballast players of the heaviest preset render
+    beside the live one (`ballast` command), 3× the work ≈ 35 % of the
+    budget, for 30 s while drawing, and the underruns are counted
+    (Chrome's `AudioContext.playbackStats`). Checked that it can fail: on
+    the Mac 12× gave 5 underruns, 30× 1 794 and kept up only 52 %.
+    Safari has no underrun counter; there only a sustained overload shows
+    (`keptUp` < 99 %), and gaps > 50 ms between quanta.
 - **Size**: `syn_wasm_bg.wasm` 650 KB, **187 KB gzip** (the whole model is
   linked: presets, schema, genome). The worklet bundle is 5 KB.
 
@@ -246,11 +259,16 @@ The gate's bench is `core-bench.html` (`npm run bench:core` headless;
 `npm run bench:serve` serves it over self-signed HTTPS to a phone on the
 LAN). Results, worklet thread, 48 kHz:
 
-| device | browser | heaviest preset (batch) | live, while drawing | underruns | verdict |
+| device | browser | heaviest (batch, idle / drawing) | live idle / drawing | underruns live / at 3× | verdict |
 |---|---|---|---|---|---|
-| MacBook (M-series, 10 cores) | headless Chromium, SwiftShader picture 30 fps at rung 2 | Fractal garden 6.3 % (16× realtime); lightest 1.1 % | 6.5 % over 60 s | 0 (max gap 6 ms) | pass |
-| mid-range Android | Chrome | | | | pending |
+| MacBook (M-series, 10 cores) | headless Chromium, SwiftShader picture 30 fps at rung 2 | Fractal garden 6.3 % / 6.3 % (16× realtime); lightest 1.1 % | 22.6 % / 6.2 % | 0 / 0 | pass |
+| Android 10, 8 cores (first bench, no stress phase) | Chrome 154, picture 60 fps at rung 2 (577×1080, grid 205×384) | Loom & copper 13.0 % (7.7×); lightest 2.1 % | — / 43.7 % | 0 / — | 44 % > 35 % by the old reading; rerun |
+| Android | Chrome | | | | pending (rerun) |
 | iPhone | Safari | | | | pending |
+
+`-C target-feature=+simd128` was tried: the same within ±3 % (node, all 15
+presets, twice) — the DSP is per-sample and scalar, there is nothing for
+the auto-vectorizer. Not a lever.
 
 The production bundle (`vite build`) measures the same (6.4 % / 6.2 %).
 
