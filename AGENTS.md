@@ -231,6 +231,17 @@ src/dsp/mod.ts         LFO (pure function of absolute time; shapes append-only,
                        ModRoute.target = 'fx' | formula id | visual card id —
                        the three namespaces never collide
 src/dsp/gate.ts, rng.ts  fade gate for disabled generators; mulberry32 + gaussian
+src/audio/coreEngine.ts  (branch core, PLAN-CORE.md phase 3) the LIVE sound:
+                       one AudioWorkletNode hosting the core's syn-player
+                       (src/worklet/core.ts). Points go in as JSON bytes
+                       (applyState = glide, switchTo = fade out → switch →
+                       fade in); feature frames come back every ~21 ms and
+                       coreFrames.ts picks the one being HEARD. The core does
+                       FX, analysis and onset hits; main.ts reads features()
+                       and hitHeard(). engine.ts below now serves only the
+                       scout's offline render and analyze.mjs (phases 4, 8)
+src/core/              protocol.ts (main ↔ worklet), audio.ts (compile the
+                       module, start the node), pkg/ (built, never committed)
 src/worklet/processors.ts  AudioWorklet processors (loaded via ?worker&url):
                        formula-generator (seeded rng) and shimmer
 src/audio/engine.ts    AudioEngine: build(ctx) works on any BaseAudioContext;

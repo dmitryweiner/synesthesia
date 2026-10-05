@@ -4,7 +4,7 @@
 // output view for every quantum.
 import { readFileSync } from 'node:fs';
 import { decodeUtf8 } from '../src/worklet/textPolyfill';
-import { isCoreStats, type CoreCommand, type CoreProcessorOptions, type CoreStats } from '../src/core/protocol';
+import { FRAME, FRAME_LEN, isCoreFrame, isCoreStats, type CoreCommand, type CoreProcessorOptions, type CoreStats } from '../src/core/protocol';
 
 const WASM = readFileSync(new URL('../src/core/pkg/syn_wasm_bg.wasm', import.meta.url));
 
@@ -132,6 +132,25 @@ describe('the core processor', () => {
     loaded.port.onmessage?.({ data: { type: 'ballast', point, count: 0 } });
     loaded.port.onmessage?.({ data: { type: 'stats' } });
     expect(last(loaded.port.posted)).toMatchObject({ ballast: 0 });
+  });
+
+  it('posts a feature frame about every 21 ms, stamped on the engine clock', async () => {
+    const point = await presetPoint(10); // Bell spots: struck, so it has hits
+    const Ctor = await loadWorklet();
+    const p = new Ctor({ processorOptions: { module: new WebAssembly.Module(WASM), point } });
+    p.port.onmessage?.({ data: { type: 'fadeIn' } });
+    const out = quantum();
+    for (let i = 0; i < 375 * 8; i++) p.process([], out); // 8 s
+    const frames = p.port.posted.filter(isCoreFrame).map((m) => m.f);
+    expect(frames.length).toBeGreaterThan(330);
+    expect(frames.length).toBeLessThan(380);
+    expect(frames.every((f) => f.length === FRAME_LEN)).toBe(true);
+    const times = frames.map((f) => f[FRAME.time]);
+    expect(times.every((t, i) => i === 0 || t > times[i - 1])).toBe(true);
+    expect(times[times.length - 1]).toBeCloseTo(8, 1);
+    const last = frames[frames.length - 1];
+    expect(last[FRAME.loudness]).toBeGreaterThan(0);
+    expect(last[FRAME.hits]).toBeGreaterThan(0);
   });
 
   it('times a preset on a separate player without moving the live one', async () => {

@@ -11,7 +11,7 @@
 //   memory, remade only when the memory grows.
 import './textPolyfill';
 import { initSync, AudioCore } from '../core/pkg/syn_wasm.js';
-import { CORE_PROCESSOR, type CoreBenchResult, type CoreCommand, type CoreProcessorOptions, type CoreStats } from '../core/protocol';
+import { CORE_PROCESSOR, FRAME_LEN, FRAME_POST_QUANTA, type CoreBenchResult, type CoreCommand, type CoreProcessorOptions, type CoreStats } from '../core/protocol';
 
 function isOptions(o: unknown): o is CoreProcessorOptions {
   return typeof o === 'object' && o !== null && 'point' in o && o.point instanceof Uint8Array
@@ -33,6 +33,10 @@ class CoreProcessor extends AudioWorkletProcessor {
   private stats: CoreStats = CoreProcessor.zeroStats();
   private lastStart = 0;
   private ballast: AudioCore[] = [];
+  private frameView = new Float64Array(0);
+  private framePtr = -1;
+  private sincePost = 0;
+  private lastFrameTime = -1;
 
   constructor(options?: { processorOptions?: unknown }) {
     super();
@@ -117,7 +121,25 @@ class CoreProcessor extends AudioWorkletProcessor {
       if (gap > LONG_GAP_MS) s.longGaps++;
     }
     this.lastStart = start;
+    if (++this.sincePost >= FRAME_POST_QUANTA) {
+      this.sincePost = 0;
+      this.postFrame();
+    }
     return true;
+  }
+
+  /** The newest feature frame to the main thread, if there is a new one. */
+  private postFrame(): void {
+    const ptr = this.core.latestFrame();
+    if (ptr === 0) return;
+    if (ptr !== this.framePtr || this.frameView.buffer !== this.memory.buffer) {
+      this.framePtr = ptr;
+      this.frameView = new Float64Array(this.memory.buffer, ptr, FRAME_LEN);
+    }
+    if (this.frameView[0] === this.lastFrameTime) return;
+    this.lastFrameTime = this.frameView[0];
+    const f = this.frameView.slice();
+    this.port.postMessage({ type: 'frame', f }, [f.buffer]);
   }
 }
 

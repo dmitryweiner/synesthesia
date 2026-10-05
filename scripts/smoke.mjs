@@ -350,6 +350,23 @@ for (const v of values) {
   check(await page.locator('#undoBtn').isDisabled(), 'loading a preset should clear history');
 }
 
+// --- the sound reaches the picture: the core's feature frames (PLAN-CORE.md
+// phase 3) drive the exposure pulse, and its onset hits seed growth ---
+ctxLabel = 'features';
+{
+  const bells = values.find((v) => v === 'b:10') ?? values[0];
+  await pickPoint(bells); // Bell spots: struck, a hit every few seconds
+  const hits0 = await page.evaluate(() => Number(document.body.dataset.fxHits ?? 0));
+  const gotHit = await page.waitForFunction((h) => Number(document.body.dataset.fxHits ?? 0) > h, hits0, { timeout: 15000 })
+    .then(() => true).catch(() => false);
+  check(gotHit, 'no onset hit reached the picture in 15 s of Bell spots');
+  const breathes = await page.waitForFunction(() => {
+    const [lo, hi] = (document.body.dataset.fxExposure ?? '1-1').split('-').map(Number);
+    return hi - lo > 0.01;
+  }, null, { timeout: 15000 }).then(() => true).catch(() => false);
+  check(breathes, `the exposure does not follow the sound (data-fx-exposure=${await page.evaluate(() => document.body.dataset.fxExposure)})`);
+}
+
 // --- ?preset=N query param ---
 ctxLabel = 'preset-query';
 const qp = await context.newPage();

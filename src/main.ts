@@ -8,9 +8,10 @@ import { renderDetails } from './ui/details';
 import { SimEngine } from './sim/engine';
 import { gridSize } from './sim/grid';
 import { QUALITY_LADDER, QualityProbe, TOP_RUNG, backingStore } from './sim/quality';
-import { AudioEngine } from './audio/engine';
+import { AudioEngine } from './audio/engine'; // the scout's offline render only, until PLAN-CORE.md phase 4
+import { CoreEngine } from './audio/coreEngine';
 import { IosAudioUnlock } from './audio/iosUnlock';
-import { FeatureTracker, OnsetDetector, SILENT_FEATURES } from './audio/features';
+import { SILENT_FEATURES } from './audio/features';
 import type { AudioFeatures } from './audio/features';
 import { effectiveParams } from './dsp/mod';
 import { CARDS, cardSliderRanges } from './schema/visual';
@@ -226,10 +227,9 @@ function boot(): void {
     if (probe.done) document.body.dataset.tuned = String(probe.rung);
   }
 
-  const audio = new AudioEngine();
+  const audio = new CoreEngine();
   const iosUnlock = new IosAudioUnlock();
   let features: AudioFeatures = { ...SILENT_FEATURES };
-  const onsets = new OnsetDetector();
   const ripples = new RippleSet();
   let lastFrame = 0;
   // Observable effect stats for scripts/smoke.mjs (body[data-fx-hits],
@@ -238,9 +238,6 @@ function boot(): void {
   let expoMin = 1;
   let expoMax = 1;
   let expoWindowStart = 0;
-  let tracker: FeatureTracker | null = null;
-  let timeDomain = new Float32Array(0);
-  let freqBins = new Uint8Array(0);
 
   // --- the point --------------------------------------------------------
   // `state` is the live, fully-decoded AppState of the genome currently
@@ -278,7 +275,7 @@ function boot(): void {
       const t = lfoTime();
       if (force || t - lastAudioPush >= AUDIO_PUSH_INTERVAL) {
         lastAudioPush = t;
-        audio.applyState({ masterGain, fx: s.audio.fx, formulas: s.audio.formulas, mod: s.mod });
+        audio.applyState(s, masterGain);
       }
     }
   }
@@ -554,7 +551,7 @@ function boot(): void {
     state = decodeGenome(explorer.current);
     if (audio.running) {
       lastAudioPush = lfoTime();
-      void audio.switchTo({ masterGain, fx: state.audio.fx, formulas: state.audio.formulas, mod: state.mod });
+      void audio.switchTo(state, masterGain);
     }
     sim.reseed();
     refreshUndo();
@@ -742,7 +739,7 @@ function boot(): void {
     soundEditTimer = null;
     soundEditAt = performance.now();
     if (!audio.running) return;
-    audio.applyState({ masterGain, fx: state.audio.fx, formulas: state.audio.formulas, mod: state.mod });
+    audio.applyState(state, masterGain);
     document.body.dataset.soundEdits = String(++soundEdits); // for scripts/smoke.mjs
   }
   function pushSettingsSound(): void {
@@ -821,7 +818,7 @@ function boot(): void {
     void iosUnlock.play().then((ok) => { document.body.dataset.iosUnlock = ok ? '1' : 'refused'; });
     soundBusy(true);
     try {
-      await audio.start({ masterGain, fx: state.audio.fx, formulas: state.audio.formulas, mod: state.mod });
+      await audio.start(state, masterGain);
     } catch (err) {
       setStatus(`audio failed: ${err instanceof Error ? err.message : String(err)}`);
       soundBusy(false);
@@ -829,12 +826,6 @@ function boot(): void {
     }
     soundBusy(false);
     showSound(true);
-    const analyser = audio.analyser;
-    if (analyser) {
-      timeDomain = new Float32Array(analyser.fftSize);
-      freqBins = new Uint8Array(analyser.frequencyBinCount);
-      tracker = new FeatureTracker(audio.sampleRate);
-    }
     lastAudioPush = -1;
     scheduleScout();
   }
@@ -846,7 +837,6 @@ function boot(): void {
     clockOffset = performance.now() / 1000 - audio.time; // keep the LFO clock continuous
     stopScout();
     await audio.stop();
-    tracker = null;
     features = { ...SILENT_FEATURES };
     showSound(false);
   }
@@ -973,17 +963,15 @@ function boot(): void {
     tickMorph();
     const now = performance.now() / 1000;
     const since = lastFrame > 0 ? now - lastFrame : 0;
-    const dt = lastFrame > 0 ? Math.min(0.25, since) : 1 / 60;
     // the first frame after a start or a pause has no interval to measure
     if (lastFrame > 0) tune(since * 1000);
     lastFrame = now;
 
-    const analyser = audio.analyser;
-    if (analyser && tracker) {
-      analyser.getFloatTimeDomainData(timeDomain);
-      analyser.getByteFrequencyData(freqBins);
-      features = tracker.update(timeDomain, freqBins, dt);
-      if (onsets.update(features.onset, now)) seedOnHit(now);
+    // The core analyses its own sound (features, onset hits) and posts a
+    // frame every ~21 ms; this reads the one being heard now.
+    if (audio.running) {
+      features = audio.features() ?? features;
+      if (audio.hitHeard()) seedOnHit(now);
     }
 
     paintStroke();

@@ -2,7 +2,7 @@
 
 *Status: decisions agreed with the user on 2026-10-05; phase 0 built on
 branch `core` (2026-10-05); phase 0 done (the Android gate passed after C12, cheaper generators in
-the core); phases 0–2 done; phase 3 next.*
+the core); phases 0–3 done; phase 4 next.*
 
 The web app was the first home of Synesthesia and is still the
 specification: [synesthesia-core](../synesthesia-core/) dumps its presets,
@@ -198,7 +198,7 @@ table updated.
 | 0 | `syn-wasm` scaffold + the performance gate | **done** 2026-10-05: Android passes after C12 (heaviest 6.7 % batch, 3× clean); iPhone not measured |
 | 1 | Freeze the TS behaviour into core fixtures; core catches up | done |
 | 2 | The core becomes the specification | done |
-| 3 | Sound: the core engine in the AudioWorklet | — |
+| 3 | Sound: the core engine in the AudioWorklet | done (listening: phase 9) |
 | 4 | Session and scout | — |
 | 5 | Picture | — |
 | 6 | Settings, details, points, links | — |
@@ -416,6 +416,24 @@ direction reversed — pushed (`8eb503b`).
   reads it from the frames.
 - Checks: the smoke's sound assertions; preset switches without clicks
   (the core's `--switch` bench); the continuity test lives in the core.
+
+**Done (2026-10-05, core `54ce26f`).** `src/audio/coreEngine.ts` is the
+live sound: the worklet posts a feature frame every 8 quanta (~21 ms), and
+`src/audio/coreFrames.ts` (pure, tested) gives `main.ts` the frame being
+*heard* (`getOutputTimestamp`, else `currentTime − outputLatency`) and each
+onset hit once, when heard. The LFO clock stays `currentTime − start`, the
+engine's own clock. Volume is the point's master gain (the engine smooths
+it). A switch is fade out → 100 ms → `switch_to` → fade in, the morph a
+`setPoint` every 50 ms. The old `AudioEngine` stays only for the scout's
+offline render and `analyze.mjs` until phases 4 and 8 — no live dual path.
+Checks:
+- the smoke now asserts that the sound reaches the picture (an onset hit
+  from Bell spots within 15 s; the exposure follows the swell) — and fails
+  when the frames are cut;
+- `syn-player/tests/switch.rs`: no click at a switch between any two
+  neighbouring presets, by the click detector's own HF measure against the
+  same points playing on (and it fails without the fade-out);
+- `syn-core/tests/continuity.rs`: the web app's continuity tests.
 
 ### 4. Session and scout
 

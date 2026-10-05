@@ -34,6 +34,24 @@ export interface CoreStats {
   time: number;
 }
 
+/** The engine's newest feature frame, posted every FRAME_POST_QUANTA
+ *  quanta when it changed: syn-wasm's flattened frame (FRAME_LEN numbers). */
+export interface CoreFrameMessage { type: 'frame'; f: Float64Array }
+
+/** ~21 ms at 48 kHz: what syn-player publishes, more than a screen needs. */
+export const FRAME_POST_QUANTA = 8;
+
+/** syn-wasm's flattened frame: these, then the spectrum's 64 bands. */
+export const FRAME = {
+  time: 0, peak: 1, rms: 2, limiterDb: 3, loudness: 4, swell: 5, brightness: 6,
+  onset: 7, low: 8, mid: 9, high: 10, hits: 11, spectrum: 12,
+} as const;
+export const FRAME_LEN = 12 + 64;
+
+export function isCoreFrame(d: unknown): d is CoreFrameMessage {
+  return typeof d === 'object' && d !== null && 'type' in d && d.type === 'frame' && 'f' in d && d.f instanceof Float64Array;
+}
+
 export interface CoreBenchResult { type: 'bench'; quanta: number; ms: number; ok: boolean }
 
 export interface CoreProcessorOptions {
