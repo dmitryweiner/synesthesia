@@ -2,7 +2,7 @@
 
 *Status: decisions agreed with the user on 2026-10-05; phase 0 built on
 branch `core` (2026-10-05); phase 0 done (the Android gate passed after C12, cheaper generators in
-the core); phase 1 done but for the D1 export.*
+the core); phases 1–2 done (but for the D1 export); phase 3 next.*
 
 The web app was the first home of Synesthesia and is still the
 specification: [synesthesia-core](../synesthesia-core/) dumps its presets,
@@ -197,7 +197,7 @@ table updated.
 |---|---|---|
 | 0 | `syn-wasm` scaffold + the performance gate | **done** 2026-10-05: Android passes after C12 (heaviest 6.7 % batch, 3× clean); iPhone not measured |
 | 1 | Freeze the TS behaviour into core fixtures; core catches up | done except the D1 export (needs the user) |
-| 2 | The core becomes the specification | — |
+| 2 | The core becomes the specification | done (Android commit not pushed yet) |
 | 3 | Sound: the core engine in the AudioWorklet | — |
 | 4 | Session and scout | — |
 | 5 | Picture | — |
@@ -388,6 +388,18 @@ it turned up:
   specification" → the core is), and synesthesia-android's PLAN.md
   "Keeping up with the web app" (the direction reverses).
 - Android: `sync-shaders.sh` reads from the core.
+
+**Done (2026-10-05, core `28435d8`).** `assets/` is the source and
+`syn-core/tests/presets.rs` carries the web app's preset rules (sanitize
+round trip, 1..max formulas, every card, routes in the genome's slots, a
+sound→image link, explicit couplings ≥ the floor, genome round trip,
+audible and bounded). `dump-presets.mjs` and `dump-golden.mjs` are gone;
+the codec's check moved to `fixtures/genomes.json` (frozen states with
+their TypeScript genomes), so editing a preset no longer breaks it. The
+core's README and AGENTS say it is the specification. synesthesia-android
+`sync-shaders.sh` reads the core's `shaders/` and its PLAN.md says the
+direction reversed — committed there locally (`git log -1` in that repo),
+**not pushed: waiting for the user's go**.
 
 ### 3. Sound (branch `core`)
 
