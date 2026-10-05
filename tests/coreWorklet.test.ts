@@ -3,7 +3,7 @@
 // module handed over in processorOptions (compiled, or as bytes), and one
 // output view for every quantum.
 import { readFileSync } from 'node:fs';
-import { decodeUtf8 } from '../src/worklet/textPolyfill';
+import { decodeUtf8, encodeUtf8 } from '../src/worklet/textPolyfill';
 import { FRAME, FRAME_LEN, isCoreFrame, isCoreStats, type CoreCommand, type CoreProcessorOptions, type CoreStats } from '../src/core/protocol';
 
 const WASM = readFileSync(new URL('../src/core/pkg/syn_wasm_bg.wasm', import.meta.url));
@@ -26,6 +26,7 @@ async function loadWorklet(): Promise<ProcCtor> {
   vi.resetModules();
   const registered: { ctor?: ProcCtor } = {};
   vi.stubGlobal('TextDecoder', undefined);
+  vi.stubGlobal('TextEncoder', undefined);
   vi.stubGlobal('sampleRate', 48000);
   vi.stubGlobal('AudioWorkletProcessor', class { port = new FakePort(); });
   vi.stubGlobal('registerProcessor', (_name: string, c: ProcCtor) => { registered.ctor = c; });
@@ -49,6 +50,15 @@ const last = (xs: unknown[]): unknown => xs[xs.length - 1];
 function quantum(): Float32Array[][] {
   return [[new Float32Array(128), new Float32Array(128)]];
 }
+
+describe('the minimal TextEncoder', () => {
+  it('encodes UTF-8 like the real one', () => {
+    for (const str of ['Overtone steppe', 'Танпура — 🎲', '', 'a\u2028b']) {
+      expect(Array.from(encodeUtf8(str))).toEqual(Array.from(new TextEncoder().encode(str)));
+    }
+    expect(Array.from(encodeUtf8('\ud800'))).toEqual([0xef, 0xbf, 0xbd]);
+  });
+});
 
 describe('the minimal TextDecoder', () => {
   it('decodes UTF-8 like the real one, invalid bytes as U+FFFD', () => {

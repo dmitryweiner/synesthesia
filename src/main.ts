@@ -8,7 +8,6 @@ import { renderDetails } from './ui/details';
 import { SimEngine } from './sim/engine';
 import { gridSize } from './sim/grid';
 import { QUALITY_LADDER, QualityProbe, TOP_RUNG, backingStore } from './sim/quality';
-import { AudioEngine } from './audio/engine'; // the scout's offline render only, until PLAN-CORE.md phase 4
 import { CoreEngine } from './audio/coreEngine';
 import { IosAudioUnlock } from './audio/iosUnlock';
 import { SILENT_FEATURES } from './audio/features';
@@ -38,31 +37,26 @@ import {
 import { askConfirm, askText } from './ui/askDialog';
 import type { UserPreset } from './state/userPresets';
 import { PRESETS, DEFAULT_PRESET_INDEX } from './presets';
-import { decodeGenome, encodeGenome } from './genome/codec';
-import type { Genome } from './genome/codec';
-import { diffSummary, lerpGenome } from './genome/evolve';
-import { Explorer } from './genome/explorer';
-import type { ExplorerAction } from './genome/explorer';
-import { Scout } from './genome/scout';
-import type { ScoutPick } from './genome/scout';
-import { analyzeSound } from './analysis/fractal';
 import { SettingsPage } from './ui/settings';
+import { WebSession, initCore, parseEffects, pointOf, scoutParentOf, viewOf } from './core/session';
+import type { SessionView } from './core/session';
+import { compileCore } from './core/audio';
+import { ScoutPool } from './scout/pool';
+import type { ScoutJob } from './scout/protocol';
 import { samePoint } from './ui/settingsModel';
 
-const MORPH_SECONDS = 2.0;
-const UNDO_MORPH_SECONDS = 0.8;
-const AUDIO_PUSH_INTERVAL = 0.05; // s — how often a morph re-sends params to the worklets
+const AUDIO_PUSH_INTERVAL = 0.05; // s — how often a Settings drag re-sends the point to the sound
 const HELP_SHOWN_KEY = 'synesthesia_help_shown';
 // Scout (PLAN.md decision 7): offline-render + score candidates in the
-// background while the user listens. `?scout=0` turns it off.
-const SCOUT_ENABLED = new URLSearchParams(location.search).get('scout') !== '0';
-// 24 s at 8 kHz costs about the same as 8 s at 16 kHz but ranks candidates
-// far closer to a 30 s / 22 kHz reference (Spearman ρ 0.73 vs 0.23, measured
-// with `analyze.mjs --configs`): slow LFOs need the long window, the fractal
-// metrics don't need high frequencies.
-const SCOUT_SECONDS = 24;
-const SCOUT_SR = 8000;
-const SCOUT_DELAY_MS = 800; // after a morph settles, before rendering starts
+// background while the user listens. `?scout=0` turns it off; `?scout=30@22050`
+// renders 30 s at 22 050 Hz per candidate. Without it, the core's choice
+// (syn-session ScoutConfig) — PLAN-CORE.md phase 4 measures which.
+const SCOUT_PARAM = new URLSearchParams(location.search).get('scout');
+const SCOUT_ENABLED = SCOUT_PARAM !== '0';
+const SCOUT_CONFIG = ((): { seconds: number; sampleRate: number } => {
+  const m = /^(\d+(?:\.\d+)?)@(\d+)$/.exec(SCOUT_PARAM ?? '');
+  return m ? { seconds: Number(m[1]), sampleRate: Number(m[2]) } : { seconds: 0, sampleRate: 0 };
+})();
 
 const canvas = el('view', HTMLCanvasElement);
 const webglError = el('webglError', HTMLParagraphElement);
@@ -196,7 +190,15 @@ function canvasCap(): number {
   return SCALE_OVERRIDE ?? QUALITY_LADDER[currentRung()].maxSide;
 }
 
-function boot(): void {
+async function boot(): Promise<void> {
+  // The core (session, scout, sound) is wasm: instantiated before anything
+  // that asks it a question.
+  try {
+    await initCore();
+  } catch (err) {
+    status.textContent = `The engine failed to load: ${err instanceof Error ? err.message : String(err)}`;
+    return;
+  }
   resizeCanvas();
   let sim: SimEngine;
   try {
@@ -239,153 +241,109 @@ function boot(): void {
   let expoMax = 1;
   let expoWindowStart = 0;
 
-  // --- the point --------------------------------------------------------
-  // `state` is the live, fully-decoded AppState of the genome currently
-  // being rendered (during a morph: the interpolated one). masterGain and
-  // presetName aren't genes and are kept on the side.
+  // --- the point and the session -----------------------------------------
+  // What a press, a load, ⚙ Settings or the clock do is decided by the
+  // core's session (PLAN-CORE.md phase 4); applyEffects() gives its effects
+  // their meaning here. `state` is the point the picture draws and Settings
+  // edits: mid-morph, the blend that is audible. masterGain is the volume
+  // slider's, which the session also holds (it is not a gene).
   let masterGain = 0.75;
-  let presetName: string | undefined;
   let state: AppState = PRESETS[DEFAULT_PRESET_INDEX].state;
-  const explorer = new Explorer(encodeGenome(state));
-  let stepCount = 0;
-
-  // Morph bookkeeping: `live` eases from `morphFrom` to `morphTo`; a press
-  // mid-morph starts the next morph from `live` (what's audible/visible now).
-  let morphFrom: Genome = explorer.current;
-  let morphTo: Genome = explorer.current;
-  let live: Genome = explorer.current;
-  let morphStart = 0;
-  let morphSeconds = MORPH_SECONDS;
-  let morphDone = true;
-  let lastAudioPush = -1;
+  const session = new WebSession(
+    '', JSON.stringify(state), Math.floor(Math.random() * 2 ** 32),
+    SCOUT_ENABLED, SCOUT_CONFIG.seconds, SCOUT_CONFIG.sampleRate,
+  );
+  let view: SessionView = viewOf(session);
+  const nowS = (): number => performance.now() / 1000;
 
   // --- shared LFO clock ---------------------------------------------------
-  // Audio worklets run their LFOs on their own sample clock starting at the
-  // moment audio starts; the visual loop follows audio.time whenever audio
-  // runs, so a route on LFO 1 breathes the same way in both.
+  // The core's engine runs its LFOs on its own sample clock from the moment
+  // audio starts; the visual loop follows audio.time whenever audio runs,
+  // so a route on LFO 1 breathes the same way in both.
   let clockOffset = performance.now() / 1000;
   function lfoTime(): number {
     if (audio.running) return audio.time;
     return performance.now() / 1000 - clockOffset;
   }
 
-  function applyToEngines(s: AppState, force: boolean): void {
-    state = s;
-    if (audio.running) {
-      const t = lfoTime();
-      if (force || t - lastAudioPush >= AUDIO_PUSH_INTERVAL) {
-        lastAudioPush = t;
-        audio.applyState(s, masterGain);
+  function applyEffects(json: string, quiet = false): void {
+    for (const e of parseEffects(json)) {
+      if (quiet && e.type === 'status') continue;
+      switch (e.type) {
+        case 'setPoint':
+          state = e.point;
+          if (audio.running) audio.applyState(e.point, e.point.audio.masterGain);
+          break;
+        case 'switchTo':
+          state = e.point;
+          if (audio.running) void audio.switchTo(e.point, e.point.audio.masterGain);
+          break;
+        case 'reseed':
+          sim.reseed();
+          break;
+        case 'saveLastPoint':
+          saveLastPoint(e.point);
+          if (!details.hidden) renderDetails(detailsBody, state, scoutParentOf(session));
+          break;
+        case 'startScout':
+          runScout(e.job);
+          break;
+        case 'status':
+          setStatus(e.text);
+          break;
       }
     }
+    refreshView();
   }
 
-  function startMorph(to: Genome, seconds: number): void {
-    morphFrom = live;
-    morphTo = to;
-    morphStart = performance.now() / 1000;
-    morphSeconds = seconds;
-    morphDone = false;
-  }
-
-  function morphProgress(): number {
-    if (morphDone) return 1;
-    const t = (performance.now() / 1000 - morphStart) / morphSeconds;
-    return Math.max(0, Math.min(1, t));
-  }
-
-  function tickMorph(): void {
-    if (morphDone) return;
-    const p = morphProgress();
-    // ease-in-out so the change reads as a glide, not a jump
-    const eased = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
-    live = lerpGenome(morphFrom, morphTo, p >= 1 ? 1 : eased);
-    applyToEngines(decodeGenome(live), p >= 1);
-    if (p >= 1) {
-      morphDone = true;
-      morphFrom = morphTo;
-      onSettled();
-    }
-  }
+  // The session's clock: a morph a step further, a scout started once the
+  // sound has settled. Independent of the frame loop, which pauses.
+  setInterval(() => {
+    if (!session.wantsTick()) return;
+    applyEffects(session.tick(nowS()));
+    // the picture morphs with or without sound (the session pushes the
+    // point to the sound only while it plays)
+    if (view.morphing || !audio.running) state = pointOf(session.livePointJson());
+  }, 25);
 
   // --- UI state --------------------------------------------------------
   function setStatus(text: string): void {
     status.textContent = text;
   }
 
-  function describeChange(from: Genome, to: Genome): string {
-    const changes = diffSummary(from, to);
-    if (changes.length === 0) return 'nothing changed';
-    const arrow = { up: '↑', down: '↓', on: 'on', off: 'off', switch: '⇄' };
-    const top = changes.slice(0, 5).map((c) => `${c.label} ${arrow[c.dir]}`);
-    const more = changes.length > 5 ? ` +${changes.length - 5} more` : '';
-    return top.join(' · ') + more;
-  }
-
-  function actionLabel(a: ExplorerAction): string {
-    switch (a) {
-      case 'like': return '👍 continuing this way';
-      case 'dislike': return '👎 back to the last liked point, trying elsewhere';
-      case 'surprise': return '🎲 jumped somewhere new';
-      case 'undo': return '↩ undone';
-      case 'edit': return '⚙ set by hand in Settings';
-      case 'load': return 'loaded';
+  function refreshView(): void {
+    view = viewOf(session);
+    undoBtn.disabled = !view.canUndo;
+    setBtnText(undoBtn, view.canUndo ? `↩ Undo (${view.undoDepth})` : '↩ Undo');
+    // for scripts/smoke.mjs: candidates scored, per direction
+    if (view.scoutBusy || view.scoutedLike + view.scoutedDislike > 0) {
+      document.body.dataset.scout = `${view.scoutedLike}/${view.scoutedDislike}`;
+    } else {
+      delete document.body.dataset.scout;
     }
   }
 
-  function refreshUndo(): void {
-    undoBtn.disabled = !explorer.canUndo;
-    setBtnText(undoBtn, explorer.canUndo ? `↩ Undo (${explorer.undoDepth})` : '↩ Undo');
-  }
-
+  /** The point the search is at (mid-morph: where it is heading), with the
+   *  volume and, while it is still one, its name — what a save or a share takes. */
   function currentState(): AppState {
-    const s = cloneAppState(decodeGenome(explorer.current));
-    s.audio.masterGain = masterGain;
-    if (presetName) s.presetName = presetName;
-    return s;
-  }
-
-  // The address bar no longer carries the point (PLAN.md decision 9): it is
-  // kept in localStorage instead, so a reload comes back to it.
-  function onSettled(): void {
-    if (!details.hidden) renderDetails(detailsBody, state, scout?.parent ?? null);
-    saveLastPoint(currentState());
-    scheduleScout();
+    return pointOf(session.pointJson());
   }
 
   // --- scout ---------------------------------------------------------------
-  const scout = SCOUT_ENABLED
-    ? new Scout({
-      k: 3,
-      render: (s) => AudioEngine.renderOffline(
-        { masterGain: s.audio.masterGain, fx: s.audio.fx, formulas: s.audio.formulas, mod: s.mod },
-        SCOUT_SECONDS, SCOUT_SR,
-      ),
-      analyze: (x) => analyzeSound(x, SCOUT_SR),
-      onProgress: () => {
-        document.body.dataset.scout = `${scout?.ready('like') ?? 0}/${scout?.ready('dislike') ?? 0}`;
-        if (!details.hidden) renderDetails(detailsBody, state, scout?.parent ?? null);
-      },
-    })
-    : null;
-  let scoutTimer: ReturnType<typeof setTimeout> | null = null;
+  // The session hands out a job; the pool renders its units in Web Workers
+  // (PLAN-CORE.md C4) and the result goes back to the session, which drops
+  // it if the user has moved on.
+  const scoutPool = new ScoutPool({ module: async () => (await compileCore()).module });
 
-  function scheduleScout(): void {
-    if (!scout || scout.disabled) return;
-    if (scoutTimer !== null) clearTimeout(scoutTimer);
-    scoutTimer = setTimeout(() => {
-      scoutTimer = null;
-      if (!audio.running || !morphDone || settings.isOpen) return;
-      document.body.dataset.scout = '0/0';
-      scout.prepare(explorer, masterGain);
-    }, SCOUT_DELAY_MS);
+  function runScout(job: ScoutJob): void {
+    // quiet: the scout works in the background and never takes the status
+    // line from what the user just did (the count shows in data-scout)
+    void scoutPool.run(job).then((result) => applyEffects(session.scoutFinished(JSON.stringify(result)), true));
   }
 
+  /** Before anything that moves the point: what is still rendering is stale. */
   function stopScout(): void {
-    if (scoutTimer !== null) clearTimeout(scoutTimer);
-    scoutTimer = null;
-    scout?.cancel();
-    delete document.body.dataset.scout;
+    scoutPool.cancel();
   }
 
   // "My points" live in the library (name + cloud id); `legacy` holds points
@@ -487,76 +445,46 @@ function boot(): void {
   }
 
   // --- actions -----------------------------------------------------------
-  function afterAction(prev: Genome, seconds: number, pick: ScoutPick | null = null): void {
+  /** A press moves the point away from whatever was loaded: the link that
+   *  named it no longer does, and what the scout was rendering is stale. */
+  function stepAway(): void {
     stopScout();
-    // stepped away from whatever the URL pointed at (shared id / preset)
     history.replaceState(null, '', cleanUrl(location.href));
-    stepCount++;
-    presetName = undefined;
     setPointRef('');
-    startMorph(explorer.current, seconds);
-    refreshUndo();
-    const scouted = pick ? ` · scouted: best of ${pick.of} (fractal ${pick.analysis.score.toFixed(2)})` : '';
-    setStatus(`${actionLabel(explorer.lastAction)} · step ${stepCount} · spread ${explorer.sigma.toFixed(2)}${scouted}\n${describeChange(prev, explorer.current)}`);
   }
 
   function like(): void {
-    const prev = explorer.current;
-    const pick = scout?.take(explorer, 'like') ?? null;
-    explorer.like(pick?.genome);
-    afterAction(prev, MORPH_SECONDS, pick);
+    stepAway();
+    applyEffects(session.like(nowS()));
     flash(likeBtn, '👍 Liked');
   }
 
   function dislike(): void {
-    const prev = explorer.current;
-    const pick = scout?.take(explorer, 'dislike') ?? null;
-    explorer.dislike(pick?.genome);
-    afterAction(prev, MORPH_SECONDS, pick);
+    stepAway();
+    applyEffects(session.dislike(nowS()));
     flash(dislikeBtn, '👎 Noted');
   }
 
   function surprise(): void {
-    const prev = explorer.current;
-    // Any built-in preset except the one we're closest to by name.
-    const pool = PRESETS.filter((p) => p.name !== presetName);
-    const pick = pool[Math.floor(Math.random() * pool.length)] ?? PRESETS[0];
-    explorer.surprise(encodeGenome(pick.state));
-    afterAction(prev, MORPH_SECONDS);
-    sim.reseed();
-    flash(surpriseBtn, `🎲 near "${pick.name}"`);
+    stepAway();
+    applyEffects(session.surprise(nowS()));
+    flash(surpriseBtn, `🎲 ${view.pointName}`); // "near <preset>"
   }
 
   function undo(): void {
-    const prev = explorer.current;
-    if (!explorer.undo()) return;
-    afterAction(prev, UNDO_MORPH_SECONDS);
+    if (!view.canUndo) return;
+    stepAway();
+    applyEffects(session.undo(nowS()));
   }
 
-  /** Load a whole point (preset / link): fresh search, image reseeded. */
+  /** Load a whole point (preset / link): fresh search, a hard switch, image reseeded. */
   function loadState(s: AppState, label: string, url: string = cleanUrl(location.href)): void {
     history.replaceState(null, '', url);
-    presetName = s.presetName;
+    stopScout();
     masterGain = s.audio.masterGain;
     volume.value = String(masterGain);
-    stopScout();
-    explorer.load(encodeGenome(s));
-    stepCount = 0;
-    morphFrom = explorer.current;
-    morphTo = explorer.current;
-    live = explorer.current;
-    morphDone = true;
-    // A hard switch, not a morph: the engine ducks, rebuilds its FX (no tails
-    // of the previous point) and fades the new one in — see switchTo().
-    state = decodeGenome(explorer.current);
-    if (audio.running) {
-      lastAudioPush = lfoTime();
-      void audio.switchTo(state, masterGain);
-    }
-    sim.reseed();
-    refreshUndo();
+    applyEffects(session.load(nowS(), '', JSON.stringify(s)));
     setStatus(`${label}: ${s.presetName ?? 'unnamed point'}`);
-    onSettled();
   }
 
   // Phones dim the screen while you watch: take a wake lock on the first
@@ -600,12 +528,11 @@ function boot(): void {
   // (PLAN.md decision 10).
   saveBtn.addEventListener('click', () => { void saveCurrentPoint(); });
   async function saveCurrentPoint(): Promise<void> {
-    const suggested = suggestPointName(presetName, namedPoints());
+    const suggested = suggestPointName(currentState().presetName, namedPoints());
     const name = await askText({ title: 'Name this point', value: suggested, ok: '💾 Save' });
     if (name === null) return;
     const s = currentState();
     s.presetName = name.trim() || suggested;
-    presetName = s.presetName;
     setStatus(`saving “${s.presetName}”…`);
     saveBtn.disabled = true;
     let id: string;
@@ -617,6 +544,8 @@ function boot(): void {
     } finally {
       saveBtn.disabled = false;
     }
+    // The point is the user's own named one now (and saved as the last point).
+    applyEffects(session.keptAs(s.presetName));
     // Re-read before writing: another tab may have saved points since this
     // one loaded, and writing our own list back would drop them.
     const result = saveLibrary(upsertPoint(loadLibrary(), { id, name: s.presetName }));
@@ -629,7 +558,6 @@ function boot(): void {
     setPointRef(`u:${library.findIndex((p) => p.name === s.presetName)}`);
     flash(saveBtn, '💾 Saved');
     setStatus(`saved as “${s.presetName}” — it's in the points list, under “My points”`);
-    onSettled();
   }
 
   // Another tab saved or deleted a point: show the same list here.
@@ -687,7 +615,7 @@ function boot(): void {
   }
   detailsBtn.addEventListener('click', () => {
     details.hidden = !details.hidden;
-    if (!details.hidden) renderDetails(detailsBody, state, scout?.parent ?? null);
+    if (!details.hidden) renderDetails(detailsBody, state, scoutParentOf(session));
   });
   detailsCloseBtn.addEventListener('click', closeDetails);
 
@@ -718,6 +646,8 @@ function boot(): void {
   }, {
     onSound: pushSettingsSound,
     onVolume: (v) => {
+      // While Settings is open the sound plays the point being edited; the
+      // session takes the volume with that point when the page closes.
       masterGain = v;
       volume.value = String(v);
       audio.setMasterGain(v);
@@ -750,16 +680,13 @@ function boot(): void {
 
   function openSettings(): void {
     if (settings.isOpen) return;
-    // A morph in flight lands now: the page edits the point it was heading to.
-    if (!morphDone) {
-      live = morphTo;
-      morphFrom = morphTo;
-      morphDone = true;
-      applyToEngines(decodeGenome(live), true);
-    }
-    stopScout(); // its candidates are about the point being edited away
+    // The session lands a morph in flight (the page edits the point it was
+    // heading to) and stops the scout (its candidates are about the point
+    // being edited away).
+    stopScout();
+    applyEffects(session.openSettings(nowS()));
     endStroke();
-    state = decodeGenome(explorer.current);
+    state = currentState();
     settings.open(state, masterGain, audio.running);
     document.body.dataset.settings = 'open';
   }
@@ -770,26 +697,18 @@ function boot(): void {
     settings.hide();
     delete document.body.dataset.settings;
     settingsBtn.focus();
-    const before = decodeGenome(explorer.current);
-    if (samePoint(state, before)) {
-      state = before;
-      onSettled(); // a morph landed by openSettings() is saved and scouted here
-    } else {
-      const prev = explorer.current;
-      explorer.edit(encodeGenome(state));
+    const before = currentState();
+    const edited = !samePoint(state, before);
+    // One undoable step and a jump, not a morph — the sound is already there;
+    // no change at all only settles what opening landed.
+    const point: AppState = { ...state, audio: { ...state.audio, masterGain } };
+    if (edited) {
       history.replaceState(null, '', cleanUrl(location.href));
-      stepCount++;
-      presetName = undefined;
       setPointRef('');
-      live = explorer.current;
-      morphFrom = live;
-      morphTo = live;
-      morphDone = true;
-      applyToEngines(decodeGenome(live), true);
-      refreshUndo();
-      setStatus(`${actionLabel('edit')} · step ${stepCount}\n${describeChange(prev, explorer.current)}`);
-      onSettled();
+    } else {
+      state = before;
     }
+    applyEffects(session.closeSettings(nowS(), JSON.stringify(point)));
     resumeLoop();
   }
 
@@ -826,8 +745,7 @@ function boot(): void {
     }
     soundBusy(false);
     showSound(true);
-    lastAudioPush = -1;
-    scheduleScout();
+    applyEffects(session.setPlaying(nowS(), true));
   }
 
   async function stopAudio(): Promise<void> {
@@ -836,6 +754,7 @@ function boot(): void {
     document.body.dataset.iosUnlock = '0';
     clockOffset = performance.now() / 1000 - audio.time; // keep the LFO clock continuous
     stopScout();
+    applyEffects(session.setPlaying(nowS(), false));
     await audio.stop();
     features = { ...SILENT_FEATURES };
     showSound(false);
@@ -848,7 +767,7 @@ function boot(): void {
 
   volume.addEventListener('input', () => {
     masterGain = Number(volume.value);
-    audio.setMasterGain(masterGain);
+    applyEffects(session.setMasterGain(nowS(), masterGain));
   });
 
   document.addEventListener('keydown', (e) => {
@@ -960,7 +879,6 @@ function boot(): void {
       document.body.dataset.loop = 'paused';
       return;
     }
-    tickMorph();
     const now = performance.now() / 1000;
     const since = lastFrame > 0 ? now - lastFrame : 0;
     // the first frame after a start or a pause has no interval to measure
@@ -1060,4 +978,4 @@ function boot(): void {
   document.body.dataset.ready = '1'; // readiness signal for scripts/*.mjs
 }
 
-boot();
+void boot();

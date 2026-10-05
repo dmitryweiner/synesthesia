@@ -241,7 +241,12 @@ src/audio/coreEngine.ts  (branch core, PLAN-CORE.md phase 3) the LIVE sound:
                        and hitHeard(). engine.ts below now serves only the
                        scout's offline render and analyze.mjs (phases 4, 8)
 src/core/              protocol.ts (main ↔ worklet), audio.ts (compile the
-                       module, start the node), pkg/ (built, never committed)
+                       module, start the node), session.ts (the core's
+                       syn-session on the main thread: effects + view as
+                       typed JSON), pkg/ (built, never committed)
+src/scout/             pool.ts: the scout's Web Worker pool (cores − 2), one
+                       unit (render + score of one genome) per worker;
+                       worker.ts runs scoutScore from the core
 src/worklet/processors.ts  AudioWorklet processors (loaded via ?worker&url):
                        formula-generator (seeded rng) and shimmer
 src/audio/engine.ts    AudioEngine: build(ctx) works on any BaseAudioContext;

@@ -1,9 +1,11 @@
-// The wasm-bindgen glue creates a TextDecoder when it is evaluated, and an
-// AudioWorklet's scope has none in some browsers (PLAN-CORE.md phase 0).
-// The audio side's exports take and return numbers and byte arrays only, so
-// the decoder is reached only by a panic message or a string export; this
-// minimal UTF-8 one keeps the glue loadable and those readable. Import it
-// BEFORE the glue: imports are evaluated in order.
+// The wasm-bindgen glue creates a TextDecoder and a TextEncoder when it is
+// evaluated (the session's exports take strings), and an AudioWorklet's
+// scope has neither in Chromium (probed, PLAN-CORE.md phase 0). The audio
+// side's exports take and return numbers and byte arrays only, so these are
+// reached only by a panic message or a string export; minimal UTF-8 ones
+// keep the glue loadable. Without them the module throws as it loads and
+// the processor is never registered. Import this BEFORE the glue: imports
+// are evaluated in order.
 
 /** UTF-8 → string; invalid sequences become U+FFFD. */
 export function decodeUtf8(bytes: Uint8Array): string {
@@ -32,6 +34,31 @@ class MinimalTextDecoder {
         : new Uint8Array(input);
     return decodeUtf8(bytes);
   }
+}
+
+/** string → UTF-8. A lone surrogate becomes U+FFFD, as TextEncoder does. */
+export function encodeUtf8(s: string): Uint8Array {
+  const out: number[] = [];
+  for (const ch of s) {
+    let cp = ch.codePointAt(0) ?? 0xfffd;
+    if (cp >= 0xd800 && cp <= 0xdfff) cp = 0xfffd;
+    if (cp < 0x80) out.push(cp);
+    else if (cp < 0x800) out.push(0xc0 | (cp >> 6), 0x80 | (cp & 0x3f));
+    else if (cp < 0x10000) out.push(0xe0 | (cp >> 12), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f));
+    else out.push(0xf0 | (cp >> 18), 0x80 | ((cp >> 12) & 0x3f), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f));
+  }
+  return Uint8Array.from(out);
+}
+
+class MinimalTextEncoder {
+  readonly encoding = 'utf-8';
+  encode(input = ''): Uint8Array {
+    return encodeUtf8(input);
+  }
+}
+
+if (typeof globalThis.TextEncoder === 'undefined') {
+  Object.defineProperty(globalThis, 'TextEncoder', { value: MinimalTextEncoder, configurable: true, writable: true });
 }
 
 if (typeof globalThis.TextDecoder === 'undefined') {

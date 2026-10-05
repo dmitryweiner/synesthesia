@@ -16,7 +16,10 @@
 //
 // scripts/core-bench.mjs drives this page headless and prints
 // window.coreBenchResult; on a phone, press Start and "Copy result".
-import init, { presetNames, presetStateJson, coreVersion } from '../core/pkg/syn_wasm.js';
+import init, { presetNames, presetStateJson, coreVersion, WebSession } from '../core/pkg/syn_wasm.js';
+import { parseEffects } from '../core/session';
+import { ScoutPool, defaultPoolSize } from '../scout/pool';
+import type { ScoutJob } from '../scout/protocol';
 import { compileCore, createCoreNode, type CoreTransport } from '../core/audio';
 import { isCoreBenchResult, isCoreStats, type CoreCommand, type CoreStats } from '../core/protocol';
 import { PRESETS } from '../presets';
@@ -37,6 +40,15 @@ const IDLE_SECS = Number(q.get('idle') ?? 20);
  *  work ≈ the gate's 35 % of the budget, measured by underruns, not a clock. */
 const STRESS = Number(q.get('stress') ?? 3);
 const STRESS_SECS = Number(q.get('stressSecs') ?? 30);
+/** The scout phase (PLAN-CORE.md phase 4): each `seconds@rate` renders
+ *  SCOUT_JOBS whole jobs on the worker pool while the heaviest preset plays
+ *  and the picture draws. `?scout=0` skips it. */
+const SCOUT_CONFIGS: [number, number][] = q.get('scout') === '0' ? []
+  : (q.get('scout') ?? '24@8000,30@22050').split(',').map((c) => {
+    const [a, b] = c.split('@').map(Number);
+    return [a, b];
+  });
+const SCOUT_JOBS = Number(q.get('scoutJobs') ?? 3);
 const TRANSPORT: CoreTransport = q.get('transport') === 'bytes' ? 'bytes' : 'module';
 const ONLY = q.get('preset'); // comma list: time only these
 
@@ -53,6 +65,9 @@ const table = el('table', HTMLTableElement);
 const envEl = el('env', HTMLPreElement);
 const canvas = el('view', HTMLCanvasElement);
 
+/** One scout configuration's jobs, run while the sound plays. */
+interface ScoutRun { config: string; workers: number; jobSeconds: number[]; underruns: number | null; longGaps: number; maxGapMs: number }
+
 interface PresetTiming { index: number; name: string; percent: number; realtime: number }
 export interface CoreBenchReport {
   core: string;
@@ -68,6 +83,7 @@ export interface CoreBenchReport {
     maxGapMs: number; longGaps: number;
     underruns: number | null; underrunMs: number | null; fps: number; canvas: string; grid: string;
     stress: { times: number; seconds: number; underruns: number | null; longGaps: number; maxGapMs: number; keptUp: number };
+    scout: ScoutRun[];
   } | null;
   pass: boolean;
 }
@@ -221,6 +237,35 @@ async function run(): Promise<CoreBenchReport> {
   const stressed = await listen(STRESS_SECS, `stress ${STRESS}×${DRAW ? ', drawing' : ''}`);
   port.postMessage({ type: 'ballast', point: pointOf(heaviest.index), count: 0 } satisfies CoreCommand);
   await wait(500);
+  // the scout's pool working while the sound plays and the picture draws
+  const scoutRuns: ScoutRun[] = [];
+  if (SCOUT_CONFIGS.length > 0) {
+    const pool = new ScoutPool({ module: async () => wasm.module });
+    for (const [secs, sr] of SCOUT_CONFIGS) {
+      const sess = new WebSession('', presetStateJson(heaviest.index) ?? '', 1, true, secs, sr);
+      sess.setPlaying(0, true);
+      let job: ScoutJob | null = null;
+      for (let i = 1; i < 400 && !job; i++) {
+        for (const e of parseEffects(sess.tick(i * 0.05))) if (e.type === 'startScout') job = e.job;
+      }
+      sess.free();
+      if (!job) throw new Error('the session never asked for a scout job');
+      await reply(port, isCoreStats, { type: 'stats', reset: true });
+      const before = playbackStats(ctx);
+      const jobSeconds: number[] = [];
+      for (let k = 0; k < SCOUT_JOBS; k++) {
+        statusEl.textContent = `scout ${secs} s @ ${sr} Hz: job ${k + 1}/${SCOUT_JOBS} on ${defaultPoolSize()} workers…`;
+        jobSeconds.push((await pool.run(job)).seconds);
+      }
+      const st = await reply(port, isCoreStats, { type: 'stats' });
+      const after = playbackStats(ctx);
+      scoutRuns.push({
+        config: `${secs}@${sr}`, workers: pool.workerCount, jobSeconds,
+        underruns: before && after ? after.events - before.events : null, longGaps: st.longGaps, maxGapMs: st.maxGapMs,
+      });
+    }
+    pool.terminate();
+  }
   statusEl.textContent = `batch while drawing: ${heaviest.name}…`;
   const batch = await reply(port, isCoreBenchResult, { type: 'bench', point: pointOf(heaviest.index), quanta });
   const pic = picture?.stop() ?? { fps: 0, canvas: '-', grid: '-' };
@@ -239,6 +284,7 @@ async function run(): Promise<CoreBenchReport> {
       longGaps: stressed.st.longGaps, maxGapMs: stressed.st.maxGapMs,
       keptUp: stressed.st.frames / (stressed.wallS * report.sampleRate),
     },
+    scout: scoutRuns,
   };
   const l = report.live;
   row([`live, not drawing: ${l.preset}`, fmt(l.idlePercent), fmt(100 / Math.max(l.idlePercent, 0.01))]);
@@ -247,13 +293,18 @@ async function run(): Promise<CoreBenchReport> {
   row([`gaps > 50 ms: ${l.longGaps} (max ${l.maxGapMs} ms)`, `underruns: ${l.underruns ?? 'n/a'}`, `${fmt(l.fps)} fps ${l.grid}`]);
   const x = l.stress;
   row([`stress ${x.times}×: gaps > 50 ms ${x.longGaps} (max ${x.maxGapMs} ms)`, `underruns: ${x.underruns ?? 'n/a'}`, `kept up ${fmt(x.keptUp * 100)} %`]);
+  for (const sc of l.scout) {
+    const mean = sc.jobSeconds.reduce((a, b) => a + b, 0) / sc.jobSeconds.length;
+    row([`scout ${sc.config} (${sc.workers} workers): a job in ${fmt(mean)} s`, `underruns: ${sc.underruns ?? 'n/a'}`, `gaps > 50 ms ${sc.longGaps} (max ${sc.maxGapMs} ms)`]);
+  }
   // The live percentages are reported, not gated: Date.now()'s steps are not
   // at random phases of the quantum on every device, and an idle CPU runs
   // the audio thread slowly (on the Mac: 22 % live idle vs 6 % in a batch).
   // 3× the work without an underrun is the gate's "≤ 35 %" without a clock.
   report.pass = heaviest.percent <= GATE_PERCENT && l.batchDrawingPercent <= GATE_PERCENT
     && (l.underruns ?? 0) === 0 && l.longGaps === 0
-    && (x.underruns ?? 0) === 0 && x.longGaps === 0 && x.keptUp > 0.99;
+    && (x.underruns ?? 0) === 0 && x.longGaps === 0 && x.keptUp > 0.99
+    && l.scout.every((sc) => (sc.underruns ?? 0) === 0 && sc.longGaps === 0);
   return report;
 }
 

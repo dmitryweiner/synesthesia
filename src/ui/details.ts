@@ -5,7 +5,7 @@ import { COUPLING_KEYS } from '../state/schema';
 import { FORMULAS, FX_ON_KEYS, FX_PARAM_LABELS, isFxModParam } from '../schema/audio';
 import { CARDS } from '../schema/visual';
 import { COUPLING_LABELS } from '../coupling';
-import type { SoundAnalysis } from '../analysis/fractal';
+import type { ScoutAnalysis } from '../scout/protocol';
 import { make } from './dom';
 
 function fmt(v: number): string {
@@ -30,15 +30,18 @@ const FX_LABEL: Record<(typeof FX_ON_KEYS)[number], string> = {
 };
 
 /** Fills the details panel's body (the panel itself keeps its close button). */
-export function renderDetails(root: HTMLElement, state: AppState, analysis: SoundAnalysis | null = null): void {
+/** `analysis` is what the core's scout measured; a number it could not
+ *  measure (a static contour's β) arrives as null. */
+export function renderDetails(root: HTMLElement, state: AppState, analysis: ScoutAnalysis | null = null): void {
   root.replaceChildren();
 
   if (analysis) {
-    const b = (v: number) => (Number.isFinite(v) ? v.toFixed(2) : 'static');
+    const n = (v: number | null): number => v ?? NaN;
+    const b = (v: number | null) => (Number.isFinite(n(v)) ? n(v).toFixed(2) : 'static');
     section(root, 'Fractality (offline render)', analysis.silent ? ['silent'] : [
-      `score ${analysis.score.toFixed(2)} of 1`,
+      `score ${n(analysis.score).toFixed(2)} of 1`,
       `loudness 1/f β ${b(analysis.envBeta)} · timbre 1/f β ${b(analysis.centroidBeta)} (pink = 1)`,
-      `spectrogram box dimension ${analysis.boxDim.toFixed(2)} · ${analysis.loudness.toFixed(0)} dBFS`,
+      `spectrogram box dimension ${n(analysis.boxDim).toFixed(2)} · ${n(analysis.loudness).toFixed(0)} dBFS`,
     ]);
   }
 

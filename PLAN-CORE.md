@@ -2,7 +2,7 @@
 
 *Status: decisions agreed with the user on 2026-10-05; phase 0 built on
 branch `core` (2026-10-05); phase 0 done (the Android gate passed after C12, cheaper generators in
-the core); phases 0–3 done; phase 4 next.*
+the core); phases 0–3 done; phase 4 built, its scout config waits for the phone.*
 
 The web app was the first home of Synesthesia and is still the
 specification: [synesthesia-core](../synesthesia-core/) dumps its presets,
@@ -199,7 +199,7 @@ table updated.
 | 1 | Freeze the TS behaviour into core fixtures; core catches up | done |
 | 2 | The core becomes the specification | done |
 | 3 | Sound: the core engine in the AudioWorklet | done (listening: phase 9) |
-| 4 | Session and scout | — |
+| 4 | Session and scout | built; the scout's render config waits for the phone |
 | 5 | Picture | — |
 | 6 | Settings, details, points, links | — |
 | 7 | Points Worker on wasm | — |
@@ -447,6 +447,37 @@ Checks:
 - Measure: candidates ready per press, and the scout's cost to the audio
   (underruns while it runs) on the phone from phase 0. Choose the render
   length/rate here and write the number into this file.
+
+**Built (2026-10-05, core `326a96c`).** `main.ts` drives `syn-session`
+through `src/core/session.ts` (syn-wasm `WebSession`; every call returns
+its effects as JSON): the presses, a load, ⚙ Settings open/close, the
+volume and a 25 ms clock go in; `applyEffects()` gives them their meaning
+(the sound, the picture, `saveLastPoint`, the status line, the scout). The
+picture reads the session's live point while it morphs, with or without
+sound. The web's own UI stays the web's: status labels of a load
+("loaded", "restored", "opened link"), the points list, URL cleaning. The
+scout's own status line ("scouted 3 + 3…") is left out, as before: it would
+overwrite what the user just did.
+- `src/scout/pool.ts` + `worker.ts`: `max(1, cores − 2)` Web Workers, each
+  its own wasm instance; a job's units (the parent, then likes and
+  dislikes interleaved) go one per worker; `scout::score` /
+  `scout::assemble` in the core are those units (the core's `scout::run`
+  read `Instant::now()`, which panics in wasm). A press cancels the job
+  in flight: it settles at once as version −1, which the session drops.
+- Found on the way: once the glue carries the session (strings), it builds
+  a `TextEncoder` as it loads, and Chromium's worklet scope has none — the
+  processor silently failed to register. The worklet polyfill has a
+  minimal encoder now, and `tests/coreWorklet.test.ts` stubs both away.
+- Behaviour that is the core's now, not the TS's: an undo takes a step
+  back off the count (the TS counted it as a step); 🎲 names the point
+  "near <preset>" and starts the count again.
+- The scout's cost (`core-bench.html`'s scout phase, 3 jobs each, the
+  heaviest preset playing and the picture drawing): MacBook, 8 workers —
+  24 s @ 8 kHz 0.26 s a job, 30 s @ 22 kHz 0.60 s, no underrun. **The
+  phone decides** whether the reference render (30 s @ 22 kHz, ρ = 1 by
+  definition, against 0.73 for the surrogate) is affordable; until then
+  the core's default (24 s @ 8 kHz) plays, and `?scout=30@22050` tries the
+  other.
 
 ### 5. Picture
 

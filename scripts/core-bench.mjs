@@ -15,9 +15,9 @@
 import { writeFileSync } from 'node:fs';
 import { parseFlags, startServer, launchBrowser, captureErrors } from './lib.mjs';
 
-const { flags } = parseFlags(process.argv.slice(2), ['secs', 'idle', 'batch', 'rung', 'draw', 'transport', 'preset', 'stress', 'stressSecs', 'json']);
+const { flags } = parseFlags(process.argv.slice(2), ['secs', 'idle', 'batch', 'rung', 'draw', 'transport', 'preset', 'stress', 'stressSecs', 'scout', 'scoutJobs', 'json']);
 const query = new URLSearchParams();
-for (const k of ['secs', 'idle', 'batch', 'rung', 'draw', 'transport', 'preset', 'stress', 'stressSecs']) if (flags.has(k)) query.set(k, flags.get(k));
+for (const k of ['secs', 'idle', 'batch', 'rung', 'draw', 'transport', 'preset', 'stress', 'stressSecs', 'scout', 'scoutJobs']) if (flags.has(k)) query.set(k, flags.get(k));
 const secs = Number(flags.get('secs') ?? 60);
 
 const { BASE, stop } = await startServer(false);
@@ -28,7 +28,7 @@ try {
   captureErrors(page, errors, () => 'bench');
   await page.goto(`${BASE}/core-bench.html?${query}`, { waitUntil: 'load', timeout: 60000 });
   await page.click('#start');
-  await page.waitForFunction(() => window.coreBenchResult !== undefined, null, { timeout: (secs + Number(flags.get('idle') ?? 20) + Number(flags.get('stressSecs') ?? 30) + 300) * 1000, polling: 1000 });
+  await page.waitForFunction(() => window.coreBenchResult !== undefined, null, { timeout: (secs + 200 + Number(flags.get('idle') ?? 20) + Number(flags.get('stressSecs') ?? 30) + 300) * 1000, polling: 1000 });
   const r = await page.evaluate(() => window.coreBenchResult);
   if (r.error) {
     console.error(`bench failed: ${r.error}`);
@@ -46,6 +46,9 @@ try {
       + `gaps > 50 ms ${l.longGaps} (max ${l.maxGapMs} ms); picture ${l.fps.toFixed(1)} fps, canvas ${l.canvas}, grid ${l.grid}`);
     const x = l.stress;
     console.log(`stress ${x.times}× for ${x.seconds.toFixed(0)} s: underruns ${x.underruns ?? 'n/a'}; gaps > 50 ms ${x.longGaps} (max ${x.maxGapMs} ms); kept up ${(x.keptUp * 100).toFixed(1)} %`);
+    for (const sc of l.scout) {
+      console.log(`scout ${sc.config} on ${sc.workers} workers: jobs ${sc.jobSeconds.map((x) => x.toFixed(2)).join(' / ')} s; underruns ${sc.underruns ?? 'n/a'}; gaps > 50 ms ${sc.longGaps} (max ${sc.maxGapMs} ms)`);
+    }
     console.log(r.pass ? 'gate: PASS on this machine' : 'gate: FAIL on this machine');
   }
   if (flags.has('json')) writeFileSync(flags.get('json'), JSON.stringify(r, null, 2));
