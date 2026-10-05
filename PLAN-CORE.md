@@ -1,8 +1,8 @@
 # Moving the web app onto the shared core — plan & decisions
 
 *Status: decisions agreed with the user on 2026-10-05; phase 0 built on
-branch `core` (2026-10-05); its Android gate failed → C12 (cheaper
-generators in the core) done; Android re-measure pending.*
+branch `core` (2026-10-05); phase 0 done (the Android gate passed after C12, cheaper generators in
+the core); phase 1 in progress.*
 
 The web app was the first home of Synesthesia and is still the
 specification: [synesthesia-core](../synesthesia-core/) dumps its presets,
@@ -195,7 +195,7 @@ table updated.
 
 | phase | | state |
 |---|---|---|
-| 0 | `syn-wasm` scaffold + the performance gate | built; Android gate failed (~2× headroom) → C12 done (~2.1× cheaper), **Android re-measure pending** |
+| 0 | `syn-wasm` scaffold + the performance gate | **done** 2026-10-05: Android passes after C12 (heaviest 6.7 % batch, 3× clean); iPhone not measured |
 | 1 | Freeze the TS behaviour into core fixtures; core catches up | — |
 | 2 | The core becomes the specification | — |
 | 3 | Sound: the core engine in the AudioWorklet | — |
@@ -292,7 +292,7 @@ LAN). Results, worklet thread, 48 kHz:
 | Android 10, 8 cores (first bench, no stress phase) | Chrome 154, picture 60 fps at rung 2 (577×1080, grid 205×384) | Loom & copper 13.0 % (7.7×); lightest 2.1 % | — / 43.7 % | 0 / — | 44 % > 35 % by the old reading; rerun |
 | Android 10, 8 cores | Chrome 154, picture 60 fps at rung 2 | Fractal garden 12.9 % / 13.1 % (7.8×); lightest 2.1 % | 51.3 % / 48.3 % | 0 / 0 by Chrome's counter, but 22 gaps > 50 ms (max 176 ms) at 3× | **fail** → C12 |
 | MacBook, after C12 | headless Chromium | Tanpura halo 3.0 % / 3.1 % | 9.8 % / 1.9 % | 0 / 0 | pass |
-| Android, after C12 | Chrome | | | | pending |
+| Android 10, 8 cores, after C12 | Chrome 154, picture 60 fps at rung 2 | Tanpura halo 6.7 % / 7.6 % (15×); Fractal garden 5.4 %, lightest 2.0 % | 29.2 % / 31.3 % | 0 / 0, no gap > 50 ms at 3× (max 9 ms), kept up 100 % | **pass** |
 | iPhone | Safari | | | | not available to the user |
 
 `-C target-feature=+simd128` was tried: the same within ±3 % (node, all 15
