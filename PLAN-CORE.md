@@ -2,7 +2,7 @@
 
 *Status: decisions agreed with the user on 2026-10-05; phase 0 built on
 branch `core` (2026-10-05); phase 0 done (the Android gate passed after C12, cheaper generators in
-the core); phases 0–3 done; phase 4 built, its scout config waits for the phone.*
+the core); phases 0–3 done; phases 0–4 done; phase 5 (the picture) next.*
 
 The web app was the first home of Synesthesia and is still the
 specification: [synesthesia-core](../synesthesia-core/) dumps its presets,
@@ -199,7 +199,7 @@ table updated.
 | 1 | Freeze the TS behaviour into core fixtures; core catches up | done |
 | 2 | The core becomes the specification | done |
 | 3 | Sound: the core engine in the AudioWorklet | done (listening: phase 9) |
-| 4 | Session and scout | built; the scout's render config waits for the phone |
+| 4 | Session and scout | done: the scout renders 24 s @ 11 kHz |
 | 5 | Picture | — |
 | 6 | Settings, details, points, links | — |
 | 7 | Points Worker on wasm | — |
@@ -478,6 +478,21 @@ overwrite what the user just did.
   definition, against 0.73 for the surrogate) is affordable; until then
   the core's default (24 s @ 8 kHz) plays, and `?scout=30@22050` tries the
   other.
+- **Decided (2026-10-06), by two measurements.** The Android phone (6
+  workers, Tanpura halo playing, the picture at 60 fps): a job of seven
+  in 1.6 s at 24 s @ 8 kHz, 4.1 s at 30 s @ 22 kHz, no underrun either
+  way. And ρ on the core's chain (105 genomes: the presets and three 👍 +
+  three 👎 proposals of each, against 30 s @ 22 kHz): 24 s @ 8 kHz **0.60**
+  (the browser chain's 0.73 does not carry over), 24 s @ 11 kHz **0.79**,
+  30 s @ 16 kHz 0.80, 16 s @ 11 kHz 0.58. So **24 s @ 11 kHz**: ρ 0.79 for
+  ~17 % more than 8 kHz, ~2 s a job on the phone — set as the core's
+  `ScoutConfig` default (core `2b3274e`), which Android gets too when it
+  bumps its pin. `?scout=S@R` still overrides it.
+- The first scout job after a page load cost the sound one 51 ms gap on
+  the phone (no underrun counted; a second run in the same tab had none):
+  six workers instantiating at once. The pool now brings them up one at a
+  time, each after the last says it is ready, and starts work with the
+  first. To re-measure cold: reload the bench page, then Start.
 
 ### 5. Picture
 

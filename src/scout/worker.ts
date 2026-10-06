@@ -17,6 +17,7 @@ self.onmessage = (e: MessageEvent) => {
   const msg: ScoutWorkerIn = e.data;
   if (msg.type === 'init') {
     initSync({ module: msg.module });
+    self.postMessage({ type: 'ready' });
     return;
   }
   const s = msg.settings;

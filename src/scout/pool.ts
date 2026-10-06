@@ -40,6 +40,8 @@ interface Running {
 /** The version of a cancelled job's result — never the explorer's. */
 export const CANCELLED = -1;
 
+const READY_TIMEOUT_MS = 3000;
+
 export function defaultPoolSize(cores = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency : 4): number {
   return Math.max(1, (cores || 4) - 2);
 }
@@ -69,23 +71,39 @@ export class ScoutPool {
     return this.workers.length;
   }
 
-  private async start(): Promise<void> {
-    if (this.workers.length > 0) return;
-    const module = await this.module();
-    for (let i = 0; i < this.size; i++) {
-      const w = this.makeWorker();
-      w.onmessage = (e: MessageEvent) => this.onResult(w, e.data);
-      w.postMessage({ type: 'init', module });
-      this.workers.push(w);
-      this.idle.push(w);
-    }
+  private starting: Promise<void> | null = null;
+
+  /** Workers come up one at a time, each after the last said it is ready:
+   *  six instantiating at once cost the sound a 51 ms gap on an Android
+   *  phone (PLAN-CORE.md phase 4). The first can start work meanwhile. */
+  private start(): Promise<void> {
+    this.starting ??= (async () => {
+      const module = await this.module();
+      for (let i = 0; i < this.size; i++) {
+        const w = this.makeWorker();
+        const ready = new Promise<void>((resolve) => {
+          const go = (): void => {
+            w.onmessage = (ev: MessageEvent) => this.onResult(w, ev.data);
+            resolve();
+          };
+          w.onmessage = (e: MessageEvent) => { if (isScoutWorkerOut(e.data) && e.data.type === 'ready') go(); };
+          setTimeout(go, READY_TIMEOUT_MS); // never wait forever on one
+        });
+        w.postMessage({ type: 'init', module });
+        await ready;
+        this.workers.push(w);
+        this.idle.push(w);
+        this.dispatch();
+      }
+    })();
+    return this.starting;
   }
 
   /** Runs a job; resolves with its result (or, after cancel(), at once with
    *  version CANCELLED). */
   async run(job: ScoutJob): Promise<ScoutResultJson> {
     this.cancel();
-    await this.start();
+    void this.start();
     const units: Unit[] = [{ id: this.nextId++, kind: 'parent', genome: job.parent }];
     // interleaved, so both directions get candidates early
     for (let i = 0; i < Math.max(job.likes.length, job.dislikes.length); i++) {
@@ -117,6 +135,7 @@ export class ScoutPool {
     this.workers = [];
     this.idle = [];
     this.busy.clear();
+    this.starting = null;
   }
 
   private result(r: Running): ScoutResultJson {
@@ -137,7 +156,7 @@ export class ScoutPool {
   }
 
   private onResult(w: WorkerLike, data: unknown): void {
-    if (!isScoutWorkerOut(data)) return;
+    if (!isScoutWorkerOut(data) || data.type === 'ready') return;
     this.busy.delete(w);
     this.idle.push(w);
     const unit = this.units.get(data.id);

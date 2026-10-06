@@ -44,7 +44,7 @@ const STRESS_SECS = Number(q.get('stressSecs') ?? 30);
  *  SCOUT_JOBS whole jobs on the worker pool while the heaviest preset plays
  *  and the picture draws. `?scout=0` skips it. */
 const SCOUT_CONFIGS: [number, number][] = q.get('scout') === '0' ? []
-  : (q.get('scout') ?? '24@8000,30@22050').split(',').map((c) => {
+  : (q.get('scout') ?? '24@11025').split(',').map((c) => {
     const [a, b] = c.split('@').map(Number);
     return [a, b];
   });

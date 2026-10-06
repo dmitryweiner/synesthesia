@@ -31,7 +31,10 @@ export type ScoutWorkerIn =
   | { type: 'score'; id: number; genome: number[]; settings: ScoutSettings };
 
 /** Worker → main thread. */
-export type ScoutWorkerOut = { type: 'scored'; id: number; analysis: ScoutAnalysis } | { type: 'failed'; id: number; error: string };
+export type ScoutWorkerOut =
+  | { type: 'ready' }
+  | { type: 'scored'; id: number; analysis: ScoutAnalysis }
+  | { type: 'failed'; id: number; error: string };
 
 /** What WebSession.scoutFinished() takes. */
 export interface ScoutResultJson {
@@ -42,5 +45,7 @@ export interface ScoutResultJson {
 }
 
 export function isScoutWorkerOut(d: unknown): d is ScoutWorkerOut {
-  return typeof d === 'object' && d !== null && 'type' in d && (d.type === 'scored' || d.type === 'failed') && 'id' in d && typeof d.id === 'number';
+  if (typeof d !== 'object' || d === null || !('type' in d)) return false;
+  if (d.type === 'ready') return true;
+  return (d.type === 'scored' || d.type === 'failed') && 'id' in d && typeof d.id === 'number';
 }

@@ -5,7 +5,10 @@ class FakeWorker implements WorkerLike {
   onmessage: ((e: MessageEvent) => void) | null = null;
   inbox: ScoutWorkerIn[] = [];
   terminated = false;
-  postMessage(m: ScoutWorkerIn): void { this.inbox.push(m); }
+  postMessage(m: ScoutWorkerIn): void {
+    this.inbox.push(m);
+    if (m.type === 'init') queueMicrotask(() => this.onmessage?.(new MessageEvent('message', { data: { type: 'ready' } })));
+  }
   terminate(): void { this.terminated = true; }
   /** Answers the oldest unanswered unit. */
   answer(score: number): number {
@@ -43,7 +46,7 @@ function pool(size: number): { p: ScoutPool; workers: FakeWorker[]; t: { now: nu
   return { p, workers, t };
 }
 
-const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+const flush = async (): Promise<void> => { for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0)); };
 
 describe('the scout pool', () => {
   it('leaves two cores to the sound and the page', () => {
@@ -70,6 +73,31 @@ describe('the scout pool', () => {
     expect(r.candidates.filter((c) => c.kind === 'like').map((c) => c.genome[0]).sort()).toEqual([1, 2, 3]);
     expect(r.candidates.filter((c) => c.kind === 'dislike')).toHaveLength(3);
     expect(r.seconds).toBe(2.5);
+  });
+
+  it('brings workers up one at a time, each after the last is ready', async () => {
+    const workers: FakeWorker[] = [];
+    let readyHeld = true;
+    const held: FakeWorker[] = [];
+    const p = new ScoutPool({
+      size: 3,
+      module: async () => EMPTY_MODULE,
+      makeWorker: () => {
+        const w = new FakeWorker();
+        const post = w.postMessage.bind(w);
+        w.postMessage = (m: ScoutWorkerIn) => { if (m.type === 'init' && readyHeld) { w.inbox.push(m); held.push(w); } else post(m); };
+        workers.push(w);
+        return w;
+      },
+    });
+    void p.run(job(1));
+    await flush();
+    expect(workers).toHaveLength(1); // the second waits for the first
+    readyHeld = false;
+    held[0].onmessage?.(new MessageEvent('message', { data: { type: 'ready' } }));
+    await flush();
+    expect(workers).toHaveLength(3);
+    p.terminate();
   });
 
   it('a cancel settles the job at once, and late results of it are ignored', async () => {
