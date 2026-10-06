@@ -474,6 +474,7 @@ ctxLabel = 'migrate';
   const before = await rows();
   await page.evaluate(() => {
     const state = JSON.parse(localStorage.getItem('synesthesia_last_point_v1') ?? 'null');
+    delete state.preset_name; // the old build spelled it presetName, and only so
     state.presetName = 'Old build point';
     localStorage.setItem('synesthesia_user_presets_v1', JSON.stringify([{ name: 'Old build point', state }]));
   });

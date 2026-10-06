@@ -12,7 +12,7 @@ const IDS = ['cnG1Iacvvb', 'a7Kp2Lm9xQ', 'Zz0987wxyV'];
 
 function point(name: string): UserPreset {
   const state = defaultAppState();
-  state.presetName = name;
+  state.preset_name = name;
   return { name, state };
 }
 
@@ -47,7 +47,7 @@ function io(opts: {
     libraryNow: () => get('library'),
     async upload(state: AppState): Promise<string> {
       if (opts.uploadFails?.(state)) throw new Error('offline');
-      uploads.push(state.presetName ?? '');
+      uploads.push(state.preset_name ?? '');
       return IDS[next++ % IDS.length];
     },
     readLibrary: (): SavedPoint[] => {
@@ -93,7 +93,7 @@ describe('migrateLegacyPoints', () => {
   });
 
   it('keeps what could not be uploaded, moves the rest', async () => {
-    const box = io({ legacy: [point('a'), point('b')], uploadFails: (s) => s.presetName === 'b' });
+    const box = io({ legacy: [point('a'), point('b')], uploadFails: (s) => s.preset_name === 'b' });
     const res = await migrateLegacyPoints(box);
     expect(res.moved).toBe(1);
     expect(res.library.map((p) => p.name)).toEqual(['a']);

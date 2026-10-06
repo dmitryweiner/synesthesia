@@ -482,7 +482,7 @@ async function boot(): Promise<void> {
     masterGain = s.audio.masterGain;
     volume.value = String(masterGain);
     applyEffects(session.load(nowS(), '', JSON.stringify(s)));
-    setStatus(`${label}: ${s.presetName ?? 'unnamed point'}`);
+    setStatus(`${label}: ${s.preset_name ?? 'unnamed point'}`);
   }
 
   // Phones dim the screen while you watch: take a wake lock on the first
@@ -526,36 +526,36 @@ async function boot(): Promise<void> {
   // (PLAN.md decision 10).
   saveBtn.addEventListener('click', () => { void saveCurrentPoint(); });
   async function saveCurrentPoint(): Promise<void> {
-    const suggested = suggestPointName(currentState().presetName, namedPoints());
+    const suggested = suggestPointName(currentState().preset_name, namedPoints());
     const name = await askText({ title: 'Name this point', value: suggested, ok: '💾 Save' });
     if (name === null) return;
     const s = currentState();
-    s.presetName = name.trim() || suggested;
-    setStatus(`saving “${s.presetName}”…`);
+    s.preset_name = name.trim() || suggested;
+    setStatus(`saving “${s.preset_name}”…`);
     saveBtn.disabled = true;
     let id: string;
     try {
       id = await sharePoint(s, { api });
     } catch {
-      setStatus(`couldn't save “${s.presetName}” — the points server is unreachable; try again in a moment`);
+      setStatus(`couldn't save “${s.preset_name}” — the points server is unreachable; try again in a moment`);
       return;
     } finally {
       saveBtn.disabled = false;
     }
     // The point is the user's own named one now (and saved as the last point).
-    applyEffects(session.keptAs(s.presetName));
+    applyEffects(session.keptAs(s.preset_name));
     // Re-read before writing: another tab may have saved points since this
     // one loaded, and writing our own list back would drop them.
-    const result = saveLibrary(upsertPoint(loadLibrary(), { id, name: s.presetName }));
+    const result = saveLibrary(upsertPoint(loadLibrary(), { id, name: s.preset_name }));
     library = loadLibrary();
     if (!result.ok) {
       // The point itself is safe on the server, so hand over its link.
-      setStatus(`${storageProblem(`couldn't add “${s.presetName}” to your points`, result.reason)}. It is stored, though: ${withPresetId(location.href, id)}`);
+      setStatus(`${storageProblem(`couldn't add “${s.preset_name}” to your points`, result.reason)}. It is stored, though: ${withPresetId(location.href, id)}`);
       return;
     }
-    setPointRef(`u:${library.findIndex((p) => p.name === s.presetName)}`);
+    setPointRef(`u:${library.findIndex((p) => p.name === s.preset_name)}`);
     flash(saveBtn, '💾 Saved');
-    setStatus(`saved as “${s.presetName}” — it's in the points list, under “My points”`);
+    setStatus(`saved as “${s.preset_name}” — it's in the points list, under “My points”`);
   }
 
   // Another tab saved or deleted a point: show the same list here.

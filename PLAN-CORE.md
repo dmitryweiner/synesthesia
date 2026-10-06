@@ -2,7 +2,7 @@
 
 *Status: decisions agreed with the user on 2026-10-05; phase 0 built on
 branch `core` (2026-10-05); phase 0 done (the Android gate passed after C12, cheaper generators in
-the core); phases 0–9 done: the swap merged into `main` on 2026-10-06; phase 10 (`preset_name`) is left.*
+the core); phases 0–10 done: the swap merged into `main` on 2026-10-06, `preset_name` the same day.*
 
 The web app was the first home of Synesthesia and is still the
 specification: [synesthesia-core](../synesthesia-core/) dumps its presets,
@@ -216,7 +216,7 @@ table updated.
 | 7 | Points Worker on wasm | done, deployed at the swap |
 | 8 | Tooling, CI, docs | done |
 | 9 | Listening pass and the swap | **done** 2026-10-06 |
-| 10 | After: `preset_name` (C11) | — |
+| 10 | After: `preset_name` (C11) | **done** 2026-10-06 |
 
 ### 0. Scaffold and the performance gate
 
@@ -660,6 +660,17 @@ the core's validation (`npm run deploy:cloud`).
 ### 10. After the swap: `preset_name` (C11)
 
 The core's TODO item, done once in the core.
+
+**Done (2026-10-06, core `bcd68a3`).** Every app writes the point's name
+as `preset_name`; `presetName` is read for good (old `#s=` links, the
+Worker's rows, localStorage, Android's files from before). The id question,
+decided with the user: **ids stay** — `point_id` hashes the canonical JSON
+with the name under its old spelling (both sort to the same place, so it
+is exactly the TypeScript's id), and a point posted in either spelling is
+one row. The console's points, whose `preset_name` the TypeScript dropped,
+keep their names now and so get new ids (6 fixture cases). The Android app
+moved to the same core in the same change (the user's choice); the
+console's own copy of syn-core is the core's remaining TODO item.
 
 ## Open questions
 

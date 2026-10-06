@@ -67,7 +67,8 @@ test('a point is normalized, stored once, and readable by its short id', async (
   assert.equal(got.status, 200);
   assert.match(got.headers.get('Cache-Control'), /immutable/);
   const state = await got.json();
-  assert.equal(state.presetName, 'Test point');
+  assert.equal(state.preset_name, 'Test point', 'stored with the name spelled as every app writes it now');
+  assert.equal(state.presetName, undefined);
   assert.equal(state.audio.formulas.fm.enabled, true);
   assert.equal(state.audio.formulas.fm.params.fc, 330);
   assert.equal(state.audio.formulas.fm.params.I, 3); // filled from defaults
@@ -75,6 +76,12 @@ test('a point is normalized, stored once, and readable by its short id', async (
 
   const other = await post({ ...point, presetName: 'Another' });
   assert.notEqual((await other.json()).id, id);
+
+  // An app that spells it preset_name posts the same point: the same id, no second row.
+  const { presetName, ...rest } = point;
+  const respelled = await post({ ...rest, preset_name: presetName });
+  assert.equal(respelled.status, 200);
+  assert.equal((await respelled.json()).id, id);
 });
 
 test('junk is stripped, out-of-range values clamped before storing', async () => {
@@ -143,7 +150,14 @@ test('the core in the Worker gives every frozen point its id', async () => {
       continue;
     }
     assert.ok(res.status === 200 || res.status === 201, `${c.kind}: ${res.status} ${await res.clone().text()}`);
-    assert.equal((await res.json()).id, c.id, c.kind);
+    const { id } = await res.json();
+    if (typeof c.input.preset_name === 'string' && c.input.preset_name) {
+      // The console's points: the TypeScript dropped their name, the core keeps it — so a new id.
+      const stored = await (await call(`/v1/points/${id}`)).json();
+      assert.equal(stored.preset_name, c.input.preset_name);
+      continue;
+    }
+    assert.equal(id, c.id, c.kind);
     checked++;
   }
   assert.ok(checked > 250, `${checked} points checked`);

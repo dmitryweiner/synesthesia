@@ -202,6 +202,9 @@ Corollaries:
   `syn_wasm_bg.wasm` from src/core/pkg): one validation and one id function
   for the apps and the server. A pin bump that changes sanitization changes
   what the Worker accepts — `npm run deploy:cloud` after such a bump.
+- The point's name is `preset_name` (PLAN-CORE.md phase 10); stored rows and
+  old links say `presetName`, which the core reads for good. The id is
+  hashed over the old spelling, so ids never moved — don't "fix" that.
 - Migration SQL: inside triggers write `SELECT (CASE … END);` — without the
   parentheses wrangler's splitter takes `END;` for the end of the trigger
   ("incomplete input").

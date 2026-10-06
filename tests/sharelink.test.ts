@@ -74,7 +74,7 @@ describe('cloud client', () => {
 
   it('fetchPoint returns a sanitized partial state; 404 → null; bad id → null without a request', async () => {
     const s = defaultAppState();
-    s.presetName = 'From the cloud';
+    s.preset_name = 'From the cloud';
     const ok = fakeFetch(() => Response.json({ ...s, junk: 1 }));
     const got = await fetchPoint('Ab3xK9pQ2m', { fetch: ok.fetch, api: 'https://api.test' });
     expect(ok.calls[0].url).toBe('https://api.test/v1/points/Ab3xK9pQ2m');

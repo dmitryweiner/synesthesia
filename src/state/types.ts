@@ -41,7 +41,9 @@ export interface CardState { on: boolean; params: Params }
 
 export interface AppState {
   v: 1;
-  presetName?: string;
+  /** The point's name; the one snake_case key, spelled so in every app (PLAN-CORE.md
+   *  phase 10). Points from before 2026-10-06 say `presetName`: the core reads both. */
+  preset_name?: string;
   audio: { masterGain: number; fx: FxState; formulas: Record<string, FormulaSnapshot> };
   visual: { cards: Record<string, CardState> };
   mod: ModState;
