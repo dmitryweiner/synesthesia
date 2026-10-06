@@ -118,6 +118,12 @@ export class CoreEngine {
     this.frames.clear();
   }
 
+  /** The feature frame being heard now (src/core/protocol.ts FRAME
+   *  layout), or null before the first one. */
+  heard(): Float64Array | null {
+    return this.ctx ? this.frames.at(this.heardTime) : null;
+  }
+
   /** What the picture reads about the sound being heard now. */
   features(): AudioFeatures | null {
     return this.frames.features(this.heardTime);

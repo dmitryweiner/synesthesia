@@ -2,7 +2,7 @@
 
 *Status: decisions agreed with the user on 2026-10-05; phase 0 built on
 branch `core` (2026-10-05); phase 0 done (the Android gate passed after C12, cheaper generators in
-the core); phases 0–3 done; phases 0–4 done; phase 5 (the picture) next.*
+the core); phases 0–3 done; phases 0–5 done; phase 6 next.*
 
 The web app was the first home of Synesthesia and is still the
 specification: [synesthesia-core](../synesthesia-core/) dumps its presets,
@@ -200,7 +200,7 @@ table updated.
 | 2 | The core becomes the specification | done |
 | 3 | Sound: the core engine in the AudioWorklet | done (listening: phase 9) |
 | 4 | Session and scout | done: the scout renders 24 s @ 11 kHz |
-| 5 | Picture | — |
+| 5 | Picture | done |
 | 6 | Settings, details, points, links | — |
 | 7 | Points Worker on wasm | — |
 | 8 | Tooling, CI, docs | — |
@@ -504,6 +504,31 @@ overwrite what the user just did.
   on GPU and CPU.
 - Measure: `--render` fps before/after on this machine, interleaved
   (AGENTS.md), must not regress.
+
+**Done (2026-10-06, core `3808e74`).** `syn-wasm` `WebPicture` is
+syn-ffi's `PictureDriver` for the page (`src/core/picture.ts`): every
+frame is one JSON (≈0.9 KB) named after the uniforms it fills; the
+driver decides the injects (hits heard, finger stamps), the ripples, the
+LFO clock (the heard frame's time while sound plays), the noise's drift,
+the seed spots, and the quality rung (`sim::quality`'s ladder and boot
+probe). `SimEngine` now only draws: `step(frame)`, `render(frame)`,
+`reseed(spots)`; its shaders come from the package (C10), so
+`src/sim/shaders/` and the identity test are gone.
+- **CPU fallback (C8):** `src/sim/cpuRenderer.ts` — the core's CPU
+  `Picture` draws the same frame into a 2D canvas, 160 px on the long
+  side, scaled up by CSS; taken when `SimEngine` cannot be made (no WebGL2
+  or no float targets) or with `?cpu=1`. The smoke checks it draws.
+- **The same picture both ways:** the smoke seeds one field, draws three
+  frames on the GPU and on the CPU (64 px, grid 128²) and compares the
+  pixels, as synesthesia-android's PictureTest does: **1.34 / 255 apart,
+  against 15.4 for a field from another seed** (bound: < 12 and the
+  control ≥ 4× further).
+- **Cost:** the driver is 25 µs a frame on the Mac (wasm, JSON included),
+  `setPoint` 74 µs per change of point. `--render` fps, base vs new
+  snapshots, interleaved, three rounds at 1280 px: grid 1024 7.63 → 7.41,
+  grid 384 17.78 → 17.35 (rounds scatter ±10 %; an earlier pair at 512
+  read 13.8 / 9.9 → 17.5 / 15.4) — no regression to measure.
+  `analyze.mjs --render --passes` builds its frame with the driver too.
 
 ### 6. Settings, details, points, links
 

@@ -6,18 +6,10 @@ import './style.css';
 import { el, make } from './ui/dom';
 import { renderDetails } from './ui/details';
 import { SimEngine } from './sim/engine';
-import { gridSize } from './sim/grid';
-import { QUALITY_LADDER, QualityProbe, TOP_RUNG, backingStore } from './sim/quality';
+import { CpuRenderer, type Renderer } from './sim/cpuRenderer';
+import { WebPicture, canvasSize, gridFor, ladderRungs, parseFrame, parseSeed, rungOf } from './core/picture';
 import { CoreEngine } from './audio/coreEngine';
 import { IosAudioUnlock } from './audio/iosUnlock';
-import { SILENT_FEATURES } from './audio/features';
-import type { AudioFeatures } from './audio/features';
-import { effectiveParams } from './dsp/mod';
-import { CARDS, cardSliderRanges } from './schema/visual';
-import { fieldVariationParamsFromCard, flowParamsFromCard, reactionParamsFromCard, ZERO_FIELD_VARIATION, ZERO_FLOW } from './sim/params';
-import { composePalette, palettesByIndex } from './palette';
-import { applyCoupling } from './coupling';
-import { RippleSet, displayCoupling } from './visualFx';
 import type { AppState } from './state/schema';
 import { cloneAppState, stateToAppState } from './state/schema';
 import { decodeStateToken, encodeStateToken } from './state/share';
@@ -31,9 +23,8 @@ import { migrateLegacyPoints } from './state/migrate';
 import { renderPointList } from './ui/pointList';
 import type { PointRow } from './ui/pointList';
 import { ScreenAwake, browserWakeLockEnv } from './ui/wakelock';
-import {
-  canvasUv, strokePoints, TOUCH_AMOUNT, TOUCH_MAX_STAMPS, TOUCH_RADIUS, TOUCH_SPACING,
-} from './ui/touch';
+import { canvasUv } from './ui/touch';
+import { FRAME } from './core/protocol';
 import { askConfirm, askText } from './ui/askDialog';
 import type { UserPreset } from './state/userPresets';
 import { PRESETS, DEFAULT_PRESET_INDEX } from './presets';
@@ -85,13 +76,9 @@ const surpriseBtn = el('surpriseBtn', HTMLButtonElement);
 const settingsBtn = el('settingsBtn', HTMLButtonElement);
 const settingsSoundBtn = el('settingsSoundBtn', HTMLButtonElement);
 
-// Slider ranges per visual card, for the LFO matrix's effectiveParams clamp.
-const VISUAL_RANGES: Record<string, Record<string, readonly [number, number]>> = {};
-for (const card of CARDS) VISUAL_RANGES[card.id] = cardSliderRanges(card);
-
 function resizeCanvas(): void {
   const rect = canvas.getBoundingClientRect();
-  const store = backingStore(canvasCap(), rect.width, rect.height, window.devicePixelRatio || 1);
+  const store = canvasSize(canvasCap(), rect.width, rect.height, window.devicePixelRatio || 1);
   canvas.width = store.width;
   canvas.height = store.height;
   document.body.dataset.canvas = `${store.width}x${store.height}`;
@@ -172,22 +159,28 @@ const SCALE_OVERRIDE = intParam('scale', 64, 8192);          // 0 = uncapped, on
 // with the user: measured once at boot, never moved under the viewer). The
 // old test was `min(innerWidth, innerHeight) < 700` — a device test that a
 // 1080p board with no GPU at all passes, and then renders at 0.4 fps.
-const probe = RES_OVERRIDE === undefined && SCALE_OVERRIDE === undefined ? new QualityProbe() : null;
+const MEASURE = RES_OVERRIDE === undefined && SCALE_OVERRIDE === undefined;
+// `?cpu=1`: draw with the CPU fallback even where WebGL2 works (C8).
+const FORCE_CPU = new URLSearchParams(location.search).get('cpu') === '1';
+// The core's picture driver: per-frame uniforms, the boot probe, the CPU
+// picture. Made in boot(), once the wasm is in.
+let picture: WebPicture | null = null;
 // Frames to let pass before the probe believes anything: shader compilation,
 // the opening morph and the point load all land in the first few and none of
 // them is the steady state.
 const BOOT_WARMUP_FRAMES = 8;
 
-function currentRung(): number {
-  return probe ? probe.rung : TOP_RUNG;
+function currentRung(): { maxSide: number; res: number } {
+  const ladder = ladderRungs();
+  return picture ? rungOf(picture) : ladder[ladder.length - 1];
 }
 
 function simResolution(): number {
-  return RES_OVERRIDE ?? QUALITY_LADDER[currentRung()].res;
+  return RES_OVERRIDE ?? currentRung().res;
 }
 
 function canvasCap(): number {
-  return SCALE_OVERRIDE ?? QUALITY_LADDER[currentRung()].maxSide;
+  return SCALE_OVERRIDE ?? currentRung().maxSide;
 }
 
 async function boot(): Promise<void> {
@@ -199,21 +192,36 @@ async function boot(): Promise<void> {
     status.textContent = `The engine failed to load: ${err instanceof Error ? err.message : String(err)}`;
     return;
   }
+  const ladder = ladderRungs();
+  const pic = new WebPicture(
+    Math.floor(Math.random() * 2 ** 32), JSON.stringify(PRESETS[DEFAULT_PRESET_INDEX].state),
+    MEASURE && !FORCE_CPU, ladder.length - 1,
+  );
+  picture = pic;
   resizeCanvas();
-  let sim: SimEngine;
+  let sim: Renderer;
   try {
-    sim = new SimEngine({ canvas, ...gridSize(simResolution(), canvas.width, canvas.height) });
+    if (FORCE_CPU) throw new Error('?cpu=1');
+    sim = new SimEngine({ canvas, ...gridFor(simResolution(), canvas.width, canvas.height) });
   } catch (err) {
-    webglError.hidden = false;
-    status.textContent = err instanceof Error ? err.message : 'WebGL2 unavailable.';
-    return;
+    // No WebGL2 with float targets: the core's CPU picture draws instead (C8).
+    try {
+      sim = new CpuRenderer(canvas, pic, Math.floor(Math.random() * 2 ** 32));
+    } catch {
+      webglError.hidden = false;
+      status.textContent = err instanceof Error ? err.message : 'WebGL2 unavailable.';
+      return;
+    }
+    document.body.dataset.renderer = 'cpu';
   }
   if (PROBE) window.synesthesiaProbe = () => sim.readState();
+  const reseed = (): void => sim.reseed(parseSeed(pic.reseed()));
+  reseed();
   // Canvas and grid always move together: the display pass is bound by the
   // one and every reaction substep by the other.
   function applyQuality(): void {
     resizeCanvas();
-    const g = gridSize(simResolution(), canvas.width, canvas.height);
+    const g = gridFor(simResolution(), canvas.width, canvas.height);
     sim.setGrid(g.width, g.height);
     document.body.dataset.grid = `${g.width}x${g.height}`;
   }
@@ -223,16 +231,14 @@ async function boot(): Promise<void> {
   let framesSeen = 0;
   /** Feeds the boot probe one real frame time (unclamped: a 2 s frame must read as 2 s). */
   function tune(frameMs: number): void {
-    if (!probe || probe.done) return;
+    if (!MEASURE || pic.probeDone()) return;
     if (++framesSeen <= BOOT_WARMUP_FRAMES) return;
-    if (probe.frame(frameMs)) applyQuality();
-    if (probe.done) document.body.dataset.tuned = String(probe.rung);
+    if (pic.probeFrame(frameMs)) applyQuality();
+    if (pic.probeDone()) document.body.dataset.tuned = String(rungOf(pic).index);
   }
 
   const audio = new CoreEngine();
   const iosUnlock = new IosAudioUnlock();
-  let features: AudioFeatures = { ...SILENT_FEATURES };
-  const ripples = new RippleSet();
   let lastFrame = 0;
   // Observable effect stats for scripts/smoke.mjs (body[data-fx-hits],
   // body[data-fx-exposure] = "min-max" over the last ~2 s).
@@ -256,15 +262,8 @@ async function boot(): Promise<void> {
   let view: SessionView = viewOf(session);
   const nowS = (): number => performance.now() / 1000;
 
-  // --- shared LFO clock ---------------------------------------------------
-  // The core's engine runs its LFOs on its own sample clock from the moment
-  // audio starts; the visual loop follows audio.time whenever audio runs,
-  // so a route on LFO 1 breathes the same way in both.
-  let clockOffset = performance.now() / 1000;
-  function lfoTime(): number {
-    if (audio.running) return audio.time;
-    return performance.now() / 1000 - clockOffset;
-  }
+  // The LFO clock is the picture driver's (the heard sound's own time while
+  // it plays, a continuation of it when it does not) — see the frame loop.
 
   function applyEffects(json: string, quiet = false): void {
     for (const e of parseEffects(json)) {
@@ -279,7 +278,7 @@ async function boot(): Promise<void> {
           if (audio.running) void audio.switchTo(e.point, e.point.audio.masterGain);
           break;
         case 'reseed':
-          sim.reseed();
+          reseed();
           break;
         case 'saveLastPoint':
           saveLastPoint(e.point);
@@ -511,7 +510,7 @@ async function boot(): Promise<void> {
   surpriseBtn.addEventListener('click', surprise);
   undoBtn.addEventListener('click', undo);
   reseedBtn.addEventListener('click', () => {
-    sim.reseed();
+    reseed();
     flash(reseedBtn, '🌱 Reseeded');
   });
 
@@ -752,11 +751,9 @@ async function boot(): Promise<void> {
     if (!audio.running) return;
     iosUnlock.stop();
     document.body.dataset.iosUnlock = '0';
-    clockOffset = performance.now() / 1000 - audio.time; // keep the LFO clock continuous
     stopScout();
     applyEffects(session.setPlaying(nowS(), false));
     await audio.stop();
-    features = { ...SILENT_FEATURES };
     showSound(false);
   }
 
@@ -793,64 +790,58 @@ async function boot(): Promise<void> {
   });
 
   // --- the frame loop ----------------------------------------------------
-  function effectiveCards(t: number): Record<string, Record<string, number>> {
-    const out: Record<string, Record<string, number>> = {};
-    for (const card of CARDS) {
-      const cs = state.visual.cards[card.id];
-      out[card.id] = effectiveParams(card.id, cs.params, state.mod.lfos, state.mod.routes, VISUAL_RANGES[card.id], t);
-    }
-    return out;
-  }
+  // What each frame does is the core's (sim::driver, PLAN-CORE.md phase 5):
+  // the point through its LFOs and the sound's couplings, an onset hit
+  // heard → growth and a ripple, a finger → stamps along its stroke, the
+  // LFO clock (the sound's own while it plays, carried on when it stops),
+  // the noise's drift. This side hands it the heard frame and draws.
 
   // --- touch / click on the canvas (PLAN.md decision 14) -----------------
-  // A finger seeds the picture exactly the way a bell strike does: the same
-  // inject() disc and the same ripple as an onset hit. Sampled once per
-  // frame, not per pointermove — a move event can fire at 120 Hz and each
-  // stamp is a full-grid pass.
-  let painting = false;
-  let pointerUv: [number, number] = [0.5, 0.5];
-  let stampedAt: [number, number] | null = null;
+  // A finger seeds the picture exactly the way a bell strike does. The
+  // driver lays the stamps once per frame, not per pointermove — a move event
+  // can fire at 120 Hz and each stamp is a full-grid pass.
   let touchSeeds = 0;
-
-  function paintStroke(): void {
-    if (!painting) return;
-    const points = stampedAt
-      ? strokePoints(stampedAt, pointerUv, TOUCH_SPACING, sim.aspect, TOUCH_MAX_STAMPS)
-      : [pointerUv];
-    for (const p of points) sim.inject(p, TOUCH_RADIUS, TOUCH_AMOUNT);
-    stampedAt = [pointerUv[0], pointerUv[1]];
-    touchSeeds += points.length;
-    document.body.dataset.touchSeeds = String(touchSeeds);
-  }
-
   canvas.addEventListener('pointerdown', (e) => {
-    painting = true;
-    stampedAt = null; // a press stamps exactly where it landed, with no trail
-    pointerUv = canvasUv(canvas.getBoundingClientRect(), e.clientX, e.clientY);
-    ripples.add(pointerUv[0], pointerUv[1], TOUCH_AMOUNT, performance.now() / 1000);
+    const [x, y] = canvasUv(canvas.getBoundingClientRect(), e.clientX, e.clientY);
+    pic.pointerDown(x, y, nowS());
     canvas.setPointerCapture(e.pointerId);
     e.preventDefault(); // no text selection, no scroll-from-canvas on a phone
   });
   canvas.addEventListener('pointermove', (e) => {
-    if (painting) pointerUv = canvasUv(canvas.getBoundingClientRect(), e.clientX, e.clientY);
+    if (!pic.painting()) return;
+    const [x, y] = canvasUv(canvas.getBoundingClientRect(), e.clientX, e.clientY);
+    pic.pointerMoved(x, y);
   });
-  const endStroke = (): void => {
-    painting = false;
-    stampedAt = null;
-  };
+  const endStroke = (): void => pic.pointerUp();
   canvas.addEventListener('pointerup', endStroke);
   canvas.addEventListener('pointercancel', endStroke);
 
-  // Onset hit → fresh growth at a random spot + a ripple from it
-  // (onsetToSeed, PLAN.md decision 8).
-  function seedOnHit(now: number): void {
-    const amount = state.coupling.onsetToSeed;
-    if (amount < 0.02) return;
-    const x = 0.08 + Math.random() * 0.84;
-    const y = 0.08 + Math.random() * 0.84;
-    sim.inject([x, y], 0.015 + 0.035 * amount, Math.min(1, 0.4 + amount));
-    ripples.add(x, y, amount, now);
-    document.body.dataset.fxHits = String(++fxHits);
+  /** The point the driver draws: handed over whenever `state` is replaced
+   *  (an effect, a morph step, Settings closing). */
+  let pictureOf: AppState | null = null;
+  function syncPicturePoint(force = false): void {
+    if (!force && pictureOf === state) return;
+    pictureOf = state;
+    pic.setPoint(JSON.stringify(state));
+  }
+
+  let heardHits = -1;
+  const sound = new Float64Array(9);
+  /** [time, loudness, swell, brightness, onset, low, mid, high, hits] of
+   *  the frame being heard, or nothing when no sound plays. */
+  function heardSound(): Float64Array {
+    const f = audio.running ? audio.heard() : null;
+    if (!f) return new Float64Array(0);
+    sound.set([
+      f[FRAME.time], f[FRAME.loudness], f[FRAME.swell], f[FRAME.brightness], f[FRAME.onset],
+      f[FRAME.low], f[FRAME.mid], f[FRAME.high], f[FRAME.hits],
+    ]);
+    // for scripts/smoke.mjs: onset hits that reached the picture
+    if (heardHits >= 0 && f[FRAME.hits] > heardHits && state.coupling.onsetToSeed >= 0.02) {
+      document.body.dataset.fxHits = String(++fxHits);
+    }
+    heardHits = f[FRAME.hits];
+    return sound;
   }
 
   function trackExposure(exposure: number, now: number): void {
@@ -885,32 +876,17 @@ async function boot(): Promise<void> {
     if (lastFrame > 0) tune(since * 1000);
     lastFrame = now;
 
-    // The core analyses its own sound (features, onset hits) and posts a
-    // frame every ~21 ms; this reads the one being heard now.
-    if (audio.running) {
-      features = audio.features() ?? features;
-      if (audio.hitHeard()) seedOnHit(now);
-    }
-
-    paintStroke();
-    const t = lfoTime();
-    const eff = applyCoupling(effectiveCards(t), features, state.coupling);
-    sim.reaction = reactionParamsFromCard(eff.reaction);
-    sim.fieldVariation = state.visual.cards.fieldVariation.on ? fieldVariationParamsFromCard(eff.fieldVariation) : { ...ZERO_FIELD_VARIATION };
-    sim.flow = state.visual.cards.flow.on ? flowParamsFromCard(eff.flow) : { ...ZERO_FLOW };
-    const pal = eff.palette;
-    sim.step();
-    const fx = displayCoupling(features, state.coupling);
-    trackExposure(fx.exposure, now);
-    sim.render(
-      composePalette(palettesByIndex(pal.paletteId), pal.shift, pal.contrast, pal.bands, pal.relief, pal.lightAngle, pal.gloss),
-      fx,
-      ripples.pack(now),
-    );
+    syncPicturePoint();
+    const painting = pic.painting();
+    const f = parseFrame(pic.frame(now, heardSound(), sim.aspect));
+    if (painting && f.injects.length > 0) document.body.dataset.touchSeeds = String(touchSeeds += f.injects.length);
+    sim.step(f);
+    trackExposure(f.display.exposure, now);
+    sim.render(f);
     // While the probe is choosing: make the next frame interval mean "this
     // frame was drawn", not "this frame was queued". Never after that — it
     // costs a swap-chain resolve every frame.
-    if (probe && !probe.done) sim.syncFrame();
+    if (MEASURE && !pic.probeDone()) sim.syncFrame();
     requestAnimationFrame(loop);
   }
 

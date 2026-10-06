@@ -104,22 +104,20 @@ if (flags.has('render') && flags.has('passes')) {
   console.log(`${pad('res', 6)} ${pad('grid', 11)} ${pad('fields', 9)} ${pad('react×1', 9)} ${pad('react×N', 10)} ${pad('display', 9)} frame at this preset's speed`);
   for (const res of grids) {
     const r = await pp.evaluate(async ({ res, w, h, preset, reps }) => {
+      // the app's picture: the core's driver on the preset (PLAN-CORE.md phase 5)
       const { SimEngine } = await import('/src/sim/engine.ts');
-      const { gridSize } = await import('/src/sim/grid.ts');
-      const { reactionParamsFromCard, fieldVariationParamsFromCard, flowParamsFromCard, ZERO_FIELD_VARIATION, ZERO_FLOW } = await import('/src/sim/params.ts');
-      const { composePalette, palettesByIndex } = await import('/src/palette.ts');
-      const { PRESETS } = await import('/src/presets.ts');
-      const cards = PRESETS[preset].state.visual.cards;
+      const { initCore } = await import('/src/core/session.ts');
+      const { WebPicture, gridFor, parseFrame, parseSeed } = await import('/src/core/picture.ts');
+      const { presetStateJson } = await import('/src/core/pkg/syn_wasm.js');
+      await initCore();
       const cv = document.createElement('canvas');
       cv.width = w;
       cv.height = h;
-      const g = gridSize(res, w, h);
+      const g = gridFor(res, w, h);
       const sim = new SimEngine({ canvas: cv, ...g });
-      sim.reaction = reactionParamsFromCard(cards.reaction.params);
-      sim.fieldVariation = cards.fieldVariation.on ? fieldVariationParamsFromCard(cards.fieldVariation.params) : { ...ZERO_FIELD_VARIATION };
-      sim.flow = cards.flow.on ? flowParamsFromCard(cards.flow.params) : { ...ZERO_FLOW };
-      const p = cards.palette.params;
-      const pal = composePalette(palettesByIndex(p.paletteId), p.shift, p.contrast, p.bands, p.relief, p.lightAngle, p.gloss);
+      const pic = new WebPicture(1, presetStateJson(preset) ?? '', false, 0);
+      sim.reseed(parseSeed(pic.reseed()));
+      const frame = { ...parseFrame(pic.frame(0, new Float64Array(0), sim.aspect)), injects: [] };
       // GL commands run in order, so a readPixels forces everything queued
       // before it to finish. Read a 1x1 FBO of our own, never the default
       // framebuffer — that one resolves the whole swap chain and costs more
@@ -144,13 +142,13 @@ if (flags.has('render') && flags.has('passes')) {
         barrier();
         return (performance.now() - t0) / reps;
       };
-      const step = (speed) => time(() => { sim.reaction.speed = speed; sim.step(); });
+      const step = (speed) => time(() => sim.step({ ...frame, reaction: { ...frame.reaction, substeps: speed } }));
       const floor = time(() => {}); // what the barrier itself adds to every row
       const s1 = step(1);
       const s11 = step(11);
       const react = (s11 - s1) / 10;
-      const display = time(() => sim.render(pal));
-      return { grid: `${g.width}x${g.height}`, fields: s1 - react - floor, react, display: display - floor, floor, speed: Math.max(1, Math.round(sim.reaction.speed)) };
+      const display = time(() => sim.render(frame));
+      return { grid: `${g.width}x${g.height}`, fields: s1 - react - floor, react, display: display - floor, floor, speed: Math.max(1, frame.reaction.substeps) };
     }, { res, w, h, preset, reps });
     const frame = r.fields + r.react * r.speed + r.display;
     console.log(`${pad(res, 6)} ${pad(r.grid, 11)} ${pad(fmt(r.fields, 1), 9)} ${pad(fmt(r.react, 1), 9)} ${pad(fmt(r.react * r.speed, 1), 10)} ${pad(fmt(r.display, 1), 9)} ${fmt(frame, 0)} ms = ${fmt(1000 / frame)} fps  (×${r.speed} substeps, barrier ±${fmt(r.floor, 1)})`);

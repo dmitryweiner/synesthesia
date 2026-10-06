@@ -22,18 +22,14 @@ import { ScoutPool, defaultPoolSize } from '../scout/pool';
 import type { ScoutJob } from '../scout/protocol';
 import { compileCore, createCoreNode, type CoreTransport } from '../core/audio';
 import { isCoreBenchResult, isCoreStats, type CoreCommand, type CoreStats } from '../core/protocol';
-import { PRESETS } from '../presets';
 import { SimEngine } from '../sim/engine';
-import { gridSize } from '../sim/grid';
-import { backingStore, QUALITY_LADDER } from '../sim/quality';
-import { fieldVariationParamsFromCard, flowParamsFromCard, reactionParamsFromCard, ZERO_FIELD_VARIATION, ZERO_FLOW } from '../sim/params';
-import { composePalette, palettesByIndex } from '../palette';
+import { WebPicture, canvasSize, gridFor, ladderRungs, parseFrame, parseSeed } from '../core/picture';
 
 const GATE_PERCENT = 35;
 const q = new URLSearchParams(location.search);
 const SECS = Number(q.get('secs') ?? 60);
 const BATCH = Number(q.get('batch') ?? 5);
-const RUNG = Math.min(QUALITY_LADDER.length - 1, Number(q.get('rung') ?? 2));
+const RUNG = Number(q.get('rung') ?? 2);
 const DRAW = q.get('draw') !== '0';
 const IDLE_SECS = Number(q.get('idle') ?? 20);
 /** The stress phase renders this many times the heaviest preset: 3× the
@@ -130,26 +126,24 @@ function row(cells: string[], head = false): void {
 }
 
 function startPicture(presetIndex: number): { stop: () => { fps: number; canvas: string; grid: string } } {
-  const rung = QUALITY_LADDER[RUNG];
+  const rung = ladderRungs()[Math.min(RUNG, ladderRungs().length - 1)];
   const rect = canvas.getBoundingClientRect();
-  const store = backingStore(rung.maxSide, rect.width, rect.height, window.devicePixelRatio || 1);
+  const store = canvasSize(rung.maxSide, rect.width, rect.height, window.devicePixelRatio || 1);
   canvas.width = store.width;
   canvas.height = store.height;
-  const grid = gridSize(rung.res, canvas.width, canvas.height);
+  const grid = gridFor(rung.res, canvas.width, canvas.height);
   const sim = new SimEngine({ canvas, ...grid });
-  const cards = PRESETS[presetIndex].state.visual.cards;
-  sim.reaction = reactionParamsFromCard(cards.reaction.params);
-  sim.fieldVariation = cards.fieldVariation.on ? fieldVariationParamsFromCard(cards.fieldVariation.params) : { ...ZERO_FIELD_VARIATION };
-  sim.flow = cards.flow.on ? flowParamsFromCard(cards.flow.params) : { ...ZERO_FLOW };
-  const p = cards.palette.params;
-  const palette = composePalette(palettesByIndex(p.paletteId), p.shift, p.contrast, p.bands, p.relief, p.lightAngle, p.gloss);
+  // the app's picture: the core's driver on the preset, no sound features
+  const pic = new WebPicture(1, presetStateJson(presetIndex) ?? '', false, rung.index);
+  sim.reseed(parseSeed(pic.reseed()));
   let frames = 0;
   let running = true;
   const t0 = performance.now();
   const loop = (): void => {
     if (!running) return;
-    sim.step();
-    sim.render(palette);
+    const f = parseFrame(pic.frame(performance.now() / 1000, new Float64Array(0), sim.aspect));
+    sim.step(f);
+    sim.render(f);
     frames++;
     requestAnimationFrame(loop);
   };

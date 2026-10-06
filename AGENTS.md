@@ -244,6 +244,11 @@ src/core/              protocol.ts (main ↔ worklet), audio.ts (compile the
                        module, start the node), session.ts (the core's
                        syn-session on the main thread: effects + view as
                        typed JSON), pkg/ (built, never committed)
+src/core/picture.ts    (branch core) the core's picture driver (WebPicture):
+                       each frame's uniforms as JSON, seed spots, touches, the
+                       quality ladder + boot probe, the CPU picture. SimEngine
+                       only draws what it is handed; src/sim/cpuRenderer.ts is
+                       the C8 fallback (no WebGL2 float targets, or ?cpu=1)
 src/scout/             pool.ts: the scout's Web Worker pool (cores − 2), one
                        unit (render + score of one genome) per worker;
                        worker.ts runs scoutScore from the core
