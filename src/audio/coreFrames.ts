@@ -3,7 +3,7 @@
 // rendered (the device buffers ahead), so the picture asks for the frame at
 // the played time — syn-player's frame_at, on this side of the port. Pure.
 import { FRAME, FRAME_LEN } from '../core/protocol';
-import type { AudioFeatures } from './features';
+import type { AudioFeatures } from '../state/types';
 
 const RING = 64; // ~1.3 s of frames: far more than any device buffers ahead
 

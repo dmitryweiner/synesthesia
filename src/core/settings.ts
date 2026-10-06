@@ -9,10 +9,8 @@ import {
   routeDomain as coreRouteDomain, samePoint as coreSamePoint, schemaJson, settingsPageJson,
   targetExp as coreTargetExp, vowelLabel as coreVowelLabel,
 } from './pkg/syn_wasm.js';
-import type { FormulaDef, FxState } from '../schema/audio';
-import type { CardDef } from '../schema/visual';
-import type { ModRoute } from '../dsp/mod';
-import type { AppState } from '../state/schema';
+import type { CardDef, FormulaDef, FxState, ModRoute } from '../state/types';
+import type { AppState } from '../state/types';
 
 export interface PageControl { k: string; name: string; min: number; max: number; step: number; exp?: boolean }
 export interface PageChoice { k: string; name: string; options: { value: string; label: string; group?: string }[] }
@@ -44,6 +42,10 @@ export interface CoreSchema {
   lfoShapes: string[];
   lfoCount: number;
   routeSlots: number;
+  filterTypes: string[];
+  chorusModes: string[];
+  fxOnKeys: string[];
+  fxModParams: string[];
 }
 
 export interface FxPreset { name: string; group: string; fx: Partial<FxState> }

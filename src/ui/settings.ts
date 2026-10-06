@@ -9,7 +9,7 @@
 // nothing for the picture — the frame loop is paused while the page is
 // open, so picture changes show when it closes. Closing is main.ts's job
 // (it commits the point as one undoable step).
-import type { AppState } from '../state/schema';
+import type { AppState } from '../state/types';
 import { make } from './dom';
 import { setupAdjustmentButtons } from './adjust';
 import { card, fillSelect, selectRow, sliderRow } from './controls';

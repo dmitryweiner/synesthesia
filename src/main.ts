@@ -1,7 +1,7 @@
-// App wiring: the two engines, the rAF loop (visual sim + LFO/coupling),
-// the explorer (like / dislike / surprise / undo), morphing between points,
-// presets, share links and the small HUD. Everything with logic worth
-// testing lives in pure modules; this file only connects them.
+// App wiring: the core's session (like / dislike / surprise / undo, morphs,
+// the scout) and its effects → the sound worklet, the picture driver and
+// SimEngine, storage, share links and the small HUD. The logic lives in the
+// core (src/core/*) and in small tested modules; this file only connects them.
 import './style.css';
 import { el, make } from './ui/dom';
 import { renderDetails } from './ui/details';
@@ -10,8 +10,8 @@ import { CpuRenderer, type Renderer } from './sim/cpuRenderer';
 import { WebPicture, canvasSize, gridFor, ladderRungs, parseFrame, parseSeed, rungOf } from './core/picture';
 import { CoreEngine } from './audio/coreEngine';
 import { IosAudioUnlock } from './audio/iosUnlock';
-import type { AppState } from './state/schema';
-import { cloneAppState, stateToAppState } from './state/schema';
+import type { AppState } from './state/types';
+import { DEFAULT_PRESET_INDEX, builtInPresets } from './core/point';
 import { cleanUrl, withPresetId } from './state/launch';
 import { fetchPoint, sharePoint } from './state/cloud';
 import { loadLastPoint, saveLastPoint } from './state/lastPoint';
@@ -26,7 +26,6 @@ import { canvasUv } from './ui/touch';
 import { FRAME } from './core/protocol';
 import { askConfirm, askText } from './ui/askDialog';
 import type { UserPreset } from './state/userPresets';
-import { PRESETS, DEFAULT_PRESET_INDEX } from './presets';
 import { SettingsPage } from './ui/settings';
 import { WebSession, encodeToken, initCore, parseEffects, parseLaunch, pointOf, scoutParentOf, viewOf } from './core/session';
 import type { SessionView } from './core/session';
@@ -191,6 +190,7 @@ async function boot(): Promise<void> {
     status.textContent = `The engine failed to load: ${err instanceof Error ? err.message : String(err)}`;
     return;
   }
+  const PRESETS = builtInPresets(); // the core's, in its order (?preset=N)
   const ladder = ladderRungs();
   const pic = new WebPicture(
     Math.floor(Math.random() * 2 ** 32), JSON.stringify(PRESETS[DEFAULT_PRESET_INDEX].state),
@@ -395,12 +395,12 @@ async function boot(): Promise<void> {
     if (ref.startsWith('b:')) {
       const p = PRESETS[index];
       if (!p) return;
-      loadState(cloneAppState(p.state), 'loaded');
+      loadState(structuredClone(p.state), 'loaded');
       setPointRef(ref);
     } else if (ref.startsWith('l:')) {
       const p = legacy[index];
       if (!p) return;
-      loadState(cloneAppState(p.state), 'loaded');
+      loadState(structuredClone(p.state), 'loaded');
       setPointRef(ref);
     } else {
       const p = library[index];
@@ -411,7 +411,7 @@ async function boot(): Promise<void> {
           setStatus(`couldn't open “${p.name}” — the points server is unreachable; try again in a moment`);
           return;
         }
-        loadState(stateToAppState(loaded), 'loaded');
+        loadState(loaded, 'loaded');
         setPointRef(ref);
       });
     }
@@ -901,7 +901,7 @@ async function boot(): Promise<void> {
       return;
     }
     const p = PRESETS[DEFAULT_PRESET_INDEX];
-    loadState(cloneAppState(p.state), 'loaded', url);
+    loadState(structuredClone(p.state), 'loaded', url);
     setPointRef(`b:${DEFAULT_PRESET_INDEX}`);
   }
 
@@ -911,14 +911,14 @@ async function boot(): Promise<void> {
     openFallback(location.href); // something to look at while the point loads
     setStatus(`opening shared point ${id}…`);
     void fetchPoint(id, { api }).then((p) => {
-      if (p) loadState(stateToAppState(p), 'opened link', withPresetId(location.href, id));
+      if (p) loadState(p, 'opened link', withPresetId(location.href, id));
       else setStatus(`couldn't open shared point ${id} (offline, or the link is wrong)`);
       document.body.dataset.launched = '1';
     });
   } else if (launch.kind === 'point') {
     loadState(launch.point, 'opened link');
   } else if (launch.kind === 'preset' && PRESETS[launch.index]) {
-    loadState(cloneAppState(PRESETS[launch.index].state), 'loaded');
+    loadState(structuredClone(PRESETS[launch.index].state), 'loaded');
     setPointRef(`b:${launch.index}`);
   } else {
     openFallback(cleanUrl(location.href));

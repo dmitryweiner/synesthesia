@@ -5,7 +5,7 @@
 // storage, the scout's workers, the status line).
 import init, { WebSession, encodeToken as coreEncodeToken, parseLaunch as coreParseLaunch } from './pkg/syn_wasm.js';
 import { compileCore } from './audio';
-import type { AppState } from '../state/schema';
+import type { AppState } from '../state/types';
 import type { ScoutAnalysis, ScoutJob } from '../scout/protocol';
 
 export { WebSession };

@@ -4,9 +4,9 @@
 // of its own side. Unlike the siblings the DOM is not the source of truth —
 // the widgets write straight into the point's ModState and sync() redraws
 // them, since both tabs edit the same LFOs.
-import type { AppState } from '../state/schema';
-import type { ModRoute } from '../dsp/mod';
-import { isLfoShape } from '../dsp/mod';
+import type { AppState } from '../state/types';
+import type { ModRoute } from '../state/types';
+import type { LfoShape } from '../state/types';
 import { make } from './dom';
 import { card, fillSelect, selectRow, sliderRow } from './controls';
 import type { ChoiceOption } from './controls';
@@ -23,6 +23,10 @@ export interface ModPanelOptions {
   state(): AppState;
   /** kind 'lfo': a shared LFO changed (heard and seen); 'route': one of this side's routes. */
   onChange(kind: 'lfo' | 'route'): void;
+}
+
+function isLfoShape(v: string): v is LfoShape {
+  return coreSchema().lfoShapes.includes(v);
 }
 
 function shapeOptions(): ChoiceOption[] {

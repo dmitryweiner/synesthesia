@@ -632,34 +632,29 @@ them as 1-…).
 
 ## Architecture
 
+Since the swap (PLAN-CORE.md phase 9, 2026-10-06) the model is
+synesthesia-core's, as wasm; this repo is the shell. The module map is in
+AGENTS.md; the sketch:
+
 ```
-src/dsp/            pure DSP: generator (21 formulas), gate, mod (LFO), rng
-src/worklet/        AudioWorklet processor entry (generator only)
-src/audio/          AudioEngine (FX chain, worklet nodes), filters,
-                    modrouting, features (analyser → loudness/centroid/flux)
-src/gl/             WebGL2 helpers (context, fullscreen quad, ping-pong)
-src/sim/            Gray–Scott engine + shaders + pure params
-src/palette.ts      cosine palettes
-src/schema/         UI-less parameter schemas: audio (formulas + FX ranges),
-                    visual (cards)
-src/genome/         genes (flat list of typed genes derived from schemas),
-                    codec (AppState ⇄ Genome), evolve (pure proposals),
-                    explorer (like/dislike/surprise/undo bookkeeping)
-src/coupling.ts     pure: audio features × coupling genes → visual offsets
-src/state/          AppState v1, tolerant sanitize, share token, user presets
-src/presets.ts      combined audio+image+mod+coupling presets
-src/analysis/       pure signal metrics (fractality, clicks) used by
-                    scripts/analyze.mjs and the scout
-src/visualFx.ts     pure: explicit display effects (pulse, flash, tint,
-                    ripples) from audio features × coupling genes
-src/state/          + canonical (canonical JSON, content ids), launch (URL →
-                    what to open), cloud (points Worker client), lastPoint
-src/main.ts         wiring: engines, rAF loop, morphing, UI
-cloud/              Cloudflare Worker + D1 for short share links
-scripts/            smoke.mjs (Playwright, local Worker in Miniflare),
-                    snap.mjs (screenshot), analyze.mjs (offline render +
-                    metrics, --switch for preset-switch clicks)
+synesthesia-core (Rust, pinned in package.json, built into src/core/pkg)
+  syn-core     point, sound (generators, FX, LFOs), analysis, genome,
+               scout, picture decisions, presets, settings data
+  syn-player   the live sound + feature frames + onset hits
+  syn-session  like/dislike/surprise/undo, morphs, the scout's bookkeeping
+  syn-wasm     the browser's bindings (AudioCore, WebSession, WebPicture, …)
+src/core/      typed wrappers over syn-wasm
+src/worklet/   the AudioWorklet hosting syn-player
+src/scout/     Web Worker pool for scout units
+src/sim/, gl/  WebGL2 drawing (the core's shaders) + the CPU fallback
+src/state/     storage, library, links, the points Worker client; types
+src/ui/        the page's widgets and panels
+src/main.ts    wiring: session effects → sound, picture, storage, scout
+cloud/         Cloudflare Worker + D1 (validates with the core's wasm)
 ```
+
+(The genome and AppState below are now defined in the core —
+syn_core::genome, syn_core::state — and kept here as the description.)
 
 ### Genome
 

@@ -5,9 +5,9 @@
 // and reads back the feature frames the picture needs. No DOM.
 import { createCoreNode } from '../core/audio';
 import { isCoreFrame, type CoreCommand } from '../core/protocol';
-import type { AppState } from '../state/schema';
+import type { AppState } from '../state/types';
 import { CoreFrames } from './coreFrames';
-import type { AudioFeatures } from './features';
+import type { AudioFeatures } from '../state/types';
 
 /** syn-player's fade length is 80 ms; a switch waits it out, then a little. */
 const SWITCH_GAP_MS = 100;

@@ -2,7 +2,7 @@
 
 *Status: decisions agreed with the user on 2026-10-05; phase 0 built on
 branch `core` (2026-10-05); phase 0 done (the Android gate passed after C12, cheaper generators in
-the core); phases 0–3 done; phases 0–8 done; phase 9 (listening pass, the swap) next.*
+the core); phases 0–9 done: the swap merged into `main` on 2026-10-06; phase 10 (`preset_name`) is left.*
 
 The web app was the first home of Synesthesia and is still the
 specification: [synesthesia-core](../synesthesia-core/) dumps its presets,
@@ -209,13 +209,13 @@ table updated.
 | 0 | `syn-wasm` scaffold + the performance gate | **done** 2026-10-05: Android passes after C12 (heaviest 6.7 % batch, 3× clean); iPhone not measured |
 | 1 | Freeze the TS behaviour into core fixtures; core catches up | done |
 | 2 | The core becomes the specification | done |
-| 3 | Sound: the core engine in the AudioWorklet | done (listening: phase 9) |
+| 3 | Sound: the core engine in the AudioWorklet | done (listened to in phase 9) |
 | 4 | Session and scout | done: the scout renders 24 s @ 11 kHz |
 | 5 | Picture | done |
 | 6 | Settings, details, points, links | done |
-| 7 | Points Worker on wasm | done (deploy waits for the swap) |
-| 8 | Tooling, CI, docs | done (module map rewritten at the swap) |
-| 9 | Listening pass and the swap | — |
+| 7 | Points Worker on wasm | done, deployed at the swap |
+| 8 | Tooling, CI, docs | done |
+| 9 | Listening pass and the swap | **done** 2026-10-06 |
 | 10 | After: `preset_name` (C11) | — |
 
 ### 0. Scaffold and the performance gate
@@ -642,6 +642,20 @@ it. The real deploy waits for the swap (phase 9), by the user's go.
   `new-preset` routine, now in the core) — this also retunes them for
   Android and the console.
 - Then: merge, delete the TS model, deploy the Worker, bump nothing else.
+
+**Done (2026-10-06, core `fa7e8a2`).** The user listened on the branch:
+"works great, I can't hear a difference in the presets" — no preset
+retuned. Then, in the merge: the TypeScript model left the repo
+(src/analysis, dsp, genome, schema, the old AudioEngine and its pieces,
+coupling, visualFx, palette, presets, fxPresets, sim/grid·params·quality,
+state/canonical·schema·share, the old worklet processors) with the 27
+test files that tested it — their behaviour is the core's tests now.
+What the page still needs of a point's shape is `src/state/types.ts`
+(types only); vitest instantiates the core's wasm (`tests/setup.ts`), and
+the library/link tests make their points with it. AGENTS.md's module map,
+README and PLAN.md "Architecture" describe the shell around the core.
+`main` publishes to Pages through CI; the points Worker was deployed with
+the core's validation (`npm run deploy:cloud`).
 
 ### 10. After the swap: `preset_name` (C11)
 

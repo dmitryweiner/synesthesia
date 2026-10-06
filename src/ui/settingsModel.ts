@@ -3,9 +3,10 @@
 // whose tests hold the guarantee that everything the page lets you set
 // survives the genome); what stays here is the page's own presentation —
 // how a slider maps to a value and how a value reads.
-import type { ModRoute } from '../dsp/mod';
-import type { FxState } from '../schema/audio';
-import { isChorusMode, isFilterType } from '../schema/audio';
+import type { ModRoute } from '../state/types';
+import type { FxState } from '../state/types';
+import type { ChorusMode, FilterType } from '../state/types';
+import { coreSchema } from '../core/settings';
 import {
   pageModel, type Domain, type PageControl, type PageCoupling, type PageFilterControls, type PageFxModule,
   type PageScale, type PageTargetGroup,
@@ -113,6 +114,13 @@ export function setFxChoice(state: FxState, k: FxChoiceKey, value: string): void
   if (k === 'phaserStages') state.phaserStages = Number(value);
   else if (k === 'filterType' && isFilterType(value)) state.filterType = value;
   else if (k === 'chorusMode' && isChorusMode(value)) state.chorusMode = value;
+}
+
+function isFilterType(v: string): v is FilterType {
+  return coreSchema().filterTypes.includes(v);
+}
+function isChorusMode(v: string): v is ChorusMode {
+  return coreSchema().chorusModes.includes(v);
 }
 
 // The core names fields by string; these read and write them only where the

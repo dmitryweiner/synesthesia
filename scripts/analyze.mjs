@@ -216,9 +216,11 @@ if (flags.has('picture')) {
     for (let t = every; t <= minutes * 60; t += every) {
       await pg.waitForTimeout(every * 1000);
       samples.push({ t, ...await pg.evaluate(async () => {
-        const { pictureMetrics } = await import('/src/analysis/picture.ts');
+        // the core's metric (syn_core::analysis::picture), on the GPU's field
+        const { pictureMetrics } = await import('/src/core/pkg/syn_wasm.js');
         const s = window.synesthesiaProbe();
-        const m = pictureMetrics(s.v, s.width, s.height, window.__prevV);
+        const m = JSON.parse(pictureMetrics(s.v, s.width, s.height, window.__prevV ?? new Float32Array(0)));
+        if (m.change === null) m.change = NaN;
         window.__prevV = s.v;
         return m;
       }) });

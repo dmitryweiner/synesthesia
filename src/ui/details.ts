@@ -1,10 +1,7 @@
 // "What is this point made of": a read-only summary of the current state.
 // Pure DOM building, no app logic.
-import type { AppState } from '../state/schema';
-import { COUPLING_KEYS } from '../state/schema';
-import { FORMULAS, FX_ON_KEYS, FX_PARAM_LABELS, isFxModParam } from '../schema/audio';
-import { CARDS } from '../schema/visual';
-import { COUPLING_LABELS } from '../coupling';
+import type { AppState } from '../state/types';
+import { coreSchema, pageModel } from '../core/settings';
 import type { ScoutAnalysis } from '../scout/protocol';
 import { make } from './dom';
 
@@ -25,7 +22,7 @@ function section(root: HTMLElement, title: string, items: string[]): void {
   root.appendChild(ul);
 }
 
-const FX_LABEL: Record<(typeof FX_ON_KEYS)[number], string> = {
+const FX_LABEL: Record<string, string> = {
   filterOn: 'Filter', chorusOn: 'Chorus', reverbOn: 'Reverb', limiterOn: 'Limiter', delayOn: 'Delay', phaserOn: 'Phaser',
 };
 
@@ -45,8 +42,12 @@ export function renderDetails(root: HTMLElement, state: AppState, analysis: Scou
     ]);
   }
 
+  // names and order are the core's (its schema and the Settings page model)
+  const schema = coreSchema();
+  const page = pageModel();
+  const fxNames = new Map(page.targetGroups.sound.find((g) => g.id === 'fx')?.params.map((p) => [p.k, p.name]) ?? []);
   const formulas: string[] = [];
-  for (const f of FORMULAS) {
+  for (const f of schema.formulas) {
     const snap = state.audio.formulas[f.id];
     if (!snap?.enabled) continue;
     const parts = f.sliders.slice(0, 4).map((s) => `${s.name.replace(/ \(.*\)/, '')} ${fmt(snap.params[s.k])}`);
@@ -55,19 +56,19 @@ export function renderDetails(root: HTMLElement, state: AppState, analysis: Scou
   section(root, 'Sound', formulas);
 
   const fx: string[] = [];
-  for (const on of FX_ON_KEYS) {
-    if (!state.audio.fx[on]) continue;
+  for (const on of schema.fxOnKeys) {
+    if (Reflect.get(state.audio.fx, on) !== true) continue;
     let extra = '';
     if (on === 'filterOn') extra = ` ${state.audio.fx.filterType} ${fmt(state.audio.fx.filterFreq)} Hz`;
     if (on === 'chorusOn') extra = ` ${state.audio.fx.chorusMode}`;
     if (on === 'delayOn') extra = ` ${fmt(state.audio.fx.delayTime)} s${state.audio.fx.delayShimmer > 0.02 ? `, shimmer ${fmt(state.audio.fx.delayShimmer)}` : ''}`;
     if (on === 'reverbOn') extra = ` ${fmt(state.audio.fx.reverbDecay)} s`;
-    fx.push(FX_LABEL[on] + extra);
+    fx.push((FX_LABEL[on] ?? on) + extra);
   }
   section(root, 'Effects', fx);
 
   const visual: string[] = [];
-  for (const c of CARDS) {
+  for (const c of schema.cards) {
     const card = state.visual.cards[c.id];
     if (!card?.on) continue;
     const sel = (c.selects ?? []).map((s) => s.options.find((o) => o.v === card.params[s.k])?.label ?? '').filter(Boolean);
@@ -79,14 +80,14 @@ export function renderDetails(root: HTMLElement, state: AppState, analysis: Scou
   const routes = state.mod.routes.map((r) => {
     const lfo = state.mod.lfos[r.src];
     let target = `${r.target}.${r.param}`;
-    if (r.target === 'fx' && isFxModParam(r.param)) target = FX_PARAM_LABELS[r.param];
+    if (r.target === 'fx') target = fxNames.get(r.param) ?? target;
     return `LFO${r.src + 1} ${lfo?.shape ?? ''} ${lfo ? fmt(lfo.rate) : ''} Hz → ${target} ${r.depth >= 0 ? '+' : ''}${fmt(r.depth)}`;
   });
   section(root, 'Modulation', routes);
 
-  const coupling = COUPLING_KEYS
-    .filter((k) => Math.abs(state.coupling[k]) > 0.01)
-    .map((k) => `${COUPLING_LABELS[k]} ${state.coupling[k] >= 0 ? '+' : ''}${fmt(state.coupling[k])}`);
+  const coupling = page.couplingControls
+    .filter((c) => Math.abs(state.coupling[c.k] ?? 0) > 0.01)
+    .map((c) => `${c.name} ${(state.coupling[c.k] ?? 0) >= 0 ? '+' : ''}${fmt(state.coupling[c.k] ?? 0)}`);
   section(root, 'Sound → image', coupling);
 
   section(root, 'Build', [typeof __BUILD__ === 'string' ? `${__BUILD__} UTC` : 'dev']);
