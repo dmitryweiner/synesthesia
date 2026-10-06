@@ -57,5 +57,9 @@ if (local) {
     run('git', ['clone', '--quiet', '--no-checkout', from, src]);
     run('git', ['-c', 'advice.detachedHead=false', 'checkout', '--quiet', rev], src);
   }
+  // Every pinned rev shares one cargo target dir, and cargo trusts file
+  // times: a checkout older than the last build would be taken as built and
+  // hand back ANOTHER rev's package. Touching its sources makes them newest.
+  run('find', [src, '-path', `${src}/target`, '-prune', '-o', '-name', '*.rs', '-exec', 'touch', '{}', '+'], src);
   build(src, rev, join(ROOT, '.core', 'target'));
 }

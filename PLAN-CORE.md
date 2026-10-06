@@ -2,7 +2,7 @@
 
 *Status: decisions agreed with the user on 2026-10-05; phase 0 built on
 branch `core` (2026-10-05); phase 0 done (the Android gate passed after C12, cheaper generators in
-the core); phases 0–3 done; phases 0–5 done; phase 6 next.*
+the core); phases 0–3 done; phases 0–6 done; phase 7 next.*
 
 The web app was the first home of Synesthesia and is still the
 specification: [synesthesia-core](../synesthesia-core/) dumps its presets,
@@ -160,6 +160,17 @@ C12. **The core's generators are made cheaper; their golden takes may move
       copper 7.1 → 3.0, Overtone steppe 6.1 → 2.2; the heaviest is now
       Tanpura halo, 3.7 → 3.3. Left: FX chain 19 %, `sin` 22 %, FFT 11 %.
 
+C13. **⚙ Settings keeps the web app's look; its data and rules are the
+    core's** (the user's choice, 2026-10-06, over the generated gene-by-gene
+    page Android has). The page still has the effect-preset menu, a filter
+    that shows only the rows its type uses, the five-formula cap and routes
+    listed per side with "add"; what it shows (titles, slider names and
+    steps, choices, filter rows per type, couplings, scales, route targets)
+    is `assets/settings-page.json` in the core, and its rules (formula cap,
+    target on, new route, route slots, modulated keys, same point) are
+    `syn_core::settings_page`, with the round-trip guarantee as a core test.
+    The web keeps only presentation: slider math and number formatting.
+
 Unchanged by all of the above: the `AppState` v1 shape and the gene order;
 localStorage keys and formats (`synesthesia_library_v1`, the last point);
 `#s=` and `?presetId=` links; the points Worker's API and D1.
@@ -201,7 +212,7 @@ table updated.
 | 3 | Sound: the core engine in the AudioWorklet | done (listening: phase 9) |
 | 4 | Session and scout | done: the scout renders 24 s @ 11 kHz |
 | 5 | Picture | done |
-| 6 | Settings, details, points, links | — |
+| 6 | Settings, details, points, links | done |
 | 7 | Points Worker on wasm | — |
 | 8 | Tooling, CI, docs | — |
 | 9 | Listening pass and the swap | — |
@@ -537,6 +548,31 @@ probe). `SimEngine` now only draws: `step(frame)`, `render(frame)`,
 - Details panel, the point's name, the status line from the session's view.
 - `parse_launch` from the core; `presetId` fetch, URL cleaning, library,
   last point, migration stay here unchanged.
+
+**Done (2026-10-06, core `130e598`).**
+- ⚙ Settings as C13 says: `src/core/settings.ts` reads the core's page
+  model, schema and effect presets and calls its rules;
+  `src/ui/settingsModel.ts` keeps the slider math; the model tests moved
+  to the core's `tests/settings_page.rs` (17, the round trip included).
+  Found there: comparing points by their genomes made the round-trip check
+  a tautology (`encode(decode(encode(p))) = encode(p)` always) — the core's
+  `same_point` compares values to nine digits, as the TypeScript did.
+- Links: `parse_launch` and `#s=` tokens from the core. Its token decoding
+  was strict serde, so an old link with a partial point did not open; it
+  sanitizes now (`point::sanitize`), as the web app did — Android gains
+  that too.
+- Details, the status line and the scout's numbers come from the session
+  (phase 4); the points list, the library, `presetId` fetching and URL
+  cleaning stay the web's.
+- `build-core.mjs` bug found: pinned revs share one cargo target dir, and a
+  checkout older than the last build was taken as built — it handed back
+  another rev's package. It touches the checkout's sources before a build.
+- **Open (the machine, not the code):** on 2026-10-06 this Mac's audio
+  device stalled — a fresh `AudioContext` in headless Chromium is
+  `running` but advances 5 ms in 1.5 s — so the smoke's two "sound reaches
+  the picture" checks fail here (no frames without a clock); every other
+  check passes, and the same checks passed on this code's parents. Re-run
+  them once the audio device runs again.
 
 ### 7. Points Worker on wasm (C5)
 

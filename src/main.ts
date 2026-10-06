@@ -12,8 +12,7 @@ import { CoreEngine } from './audio/coreEngine';
 import { IosAudioUnlock } from './audio/iosUnlock';
 import type { AppState } from './state/schema';
 import { cloneAppState, stateToAppState } from './state/schema';
-import { decodeStateToken, encodeStateToken } from './state/share';
-import { cleanUrl, parseLaunch, withPresetId } from './state/launch';
+import { cleanUrl, withPresetId } from './state/launch';
 import { fetchPoint, sharePoint } from './state/cloud';
 import { loadLastPoint, saveLastPoint } from './state/lastPoint';
 import { loadUserPresets, saveUserPresets, clearUserPresets } from './state/userPresets';
@@ -29,7 +28,7 @@ import { askConfirm, askText } from './ui/askDialog';
 import type { UserPreset } from './state/userPresets';
 import { PRESETS, DEFAULT_PRESET_INDEX } from './presets';
 import { SettingsPage } from './ui/settings';
-import { WebSession, initCore, parseEffects, pointOf, scoutParentOf, viewOf } from './core/session';
+import { WebSession, encodeToken, initCore, parseEffects, parseLaunch, pointOf, scoutParentOf, viewOf } from './core/session';
 import type { SessionView } from './core/session';
 import { compileCore } from './core/audio';
 import { ScoutPool } from './scout/pool';
@@ -578,7 +577,7 @@ async function boot(): Promise<void> {
       history.replaceState(null, '', url);
       return { url, short: true };
     } catch {
-      return { url: `${cleanUrl(location.href)}#s=${encodeStateToken(s)}`, short: false };
+      return { url: `${cleanUrl(location.href)}#s=${encodeToken(s)}`, short: false };
     }
   }
 
@@ -893,7 +892,8 @@ async function boot(): Promise<void> {
   // --- boot ----------------------------------------------------------------
   setPointRef('');
   // What to open: ?presetId= (cloud) > #s= (old long links) > ?preset=N >
-  // the last point (localStorage) > the default preset. See state/launch.ts.
+  // the last point (localStorage) > the default preset (the core's parse_launch;
+  // a #s= token that does not decode reads as no link at all).
   function openFallback(url: string): void {
     const last = loadLastPoint();
     if (last) {
@@ -915,10 +915,8 @@ async function boot(): Promise<void> {
       else setStatus(`couldn't open shared point ${id} (offline, or the link is wrong)`);
       document.body.dataset.launched = '1';
     });
-  } else if (launch.kind === 'token') {
-    const shared = decodeStateToken(launch.token);
-    if (shared) loadState(stateToAppState(shared), 'opened link');
-    else openFallback(cleanUrl(location.href));
+  } else if (launch.kind === 'point') {
+    loadState(launch.point, 'opened link');
   } else if (launch.kind === 'preset' && PRESETS[launch.index]) {
     loadState(cloneAppState(PRESETS[launch.index].state), 'loaded');
     setPointRef(`b:${launch.index}`);

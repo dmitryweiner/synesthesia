@@ -3,7 +3,7 @@
 // module loads the wasm for the main thread and gives its JSON effects and
 // view their types. main.ts gives the effects meaning (sound, picture,
 // storage, the scout's workers, the status line).
-import init, { WebSession } from './pkg/syn_wasm.js';
+import init, { WebSession, encodeToken as coreEncodeToken, parseLaunch as coreParseLaunch } from './pkg/syn_wasm.js';
 import { compileCore } from './audio';
 import type { AppState } from '../state/schema';
 import type { ScoutAnalysis, ScoutJob } from '../scout/protocol';
@@ -61,4 +61,23 @@ export function scoutParentOf(session: WebSession): ScoutAnalysis | null {
   if (json === undefined) return null;
   const a: ScoutAnalysis = JSON.parse(json);
   return a;
+}
+
+/** What a link asks to open — the core's parse_launch, in the web app's
+ *  order: a stored point, then a `#s=` token (sanitized, so an old partial
+ *  point opens with the defaults filled in), then `?preset=N`. */
+export type CoreLaunch =
+  | { kind: 'presetId'; id: string }
+  | { kind: 'point'; point: AppState }
+  | { kind: 'preset'; index: number }
+  | { kind: 'none' };
+
+export function parseLaunch(href: string): CoreLaunch {
+  const l: CoreLaunch = JSON.parse(coreParseLaunch(href));
+  return l;
+}
+
+/** The long link's `#s=` payload for a point. */
+export function encodeToken(state: Readonly<AppState>): string {
+  return coreEncodeToken(JSON.stringify(state));
 }
