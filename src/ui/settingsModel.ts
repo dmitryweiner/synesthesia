@@ -1,24 +1,23 @@
-// The ⚙ Settings page's pure side (no DOM): how a slider maps to a value,
-// which controls exist and with what ranges, which filter rows a filter type
-// uses, the 5-formula cap, and which routes each tab lists. The page itself
-// (ui/settings.ts) only builds widgets from this.
-//
-// One property matters above the rest (tests/settings.test.ts): everything
-// the page lets you set survives the genome, because closing the settings
-// commits the point through encodeGenome — what you heard is what stays.
-import type { LfoShape, ModRoute } from '../dsp/mod';
-import { isFormulaId } from '../dsp/generator';
-import type { FilterType, FxModParam, FxOnKey, FxState } from '../schema/audio';
+// The ⚙ Settings page's pure side (no DOM). Its data and its rules are the
+// core's (PLAN-CORE.md C13: src/core/settings.ts → syn_core::settings_page,
+// whose tests hold the guarantee that everything the page lets you set
+// survives the genome); what stays here is the page's own presentation —
+// how a slider maps to a value and how a value reads.
+import type { ModRoute } from '../state/types';
+import type { FxState } from '../state/types';
+import type { ChorusMode, FilterType } from '../state/types';
+import { coreSchema } from '../core/settings';
 import {
-  CHORUS_MODES, FILTER_TYPES, FORMULAS, FX_EXP_PARAMS, FX_MOD_PARAMS, FX_PARAM_LABELS,
-  FX_PARAM_RANGES, MAX_ENABLED_FORMULAS, PHASER_STAGES, REVERB_DECAY_RANGE, isChorusMode, isFilterType,
-} from '../schema/audio';
-import { ALWAYS_ON_CARD_IDS, CARDS, isCardId } from '../schema/visual';
-import type { AppState, CouplingKey } from '../state/schema';
-import { COUPLING_KEYS, COUPLING_RANGES, EXPLICIT_COUPLING_KEYS } from '../state/schema';
-import { canonicalJson } from '../state/canonical';
-import { COUPLING_LABELS } from '../coupling';
-import { LFO_RATE_RANGE, MOD_TARGETS, ROUTE_SLOTS, modTargetIndex } from '../genome/genes';
+  pageModel, type Domain, type PageControl, type PageCoupling, type PageFilterControls, type PageFxModule,
+  type PageScale, type PageTargetGroup,
+} from '../core/settings';
+
+export {
+  applyFxPreset, canAddRoute, canEnableFormula, coreSchema, fxPresets, isTargetOn, modulatedKeys, newRoute,
+  routeDomain, samePoint, targetExp, vowelLabel,
+} from '../core/settings';
+export type { Domain, FxPreset } from '../core/settings';
+export type { ModRoute };
 
 // ---------------------------------------------------------------------------
 // Slider scales
@@ -76,251 +75,69 @@ export function formatValue(v: number, step?: number): string {
 }
 
 // ---------------------------------------------------------------------------
-// Effects: one card per module, in the order the chain runs
-// (Filter → Chorus → Phaser → Delay → Reverb → Limiter, see audio/engine.ts)
+// The core's page model, read when the page is built
 
-export type FxNumKey = FxModParam | 'reverbDecay';
+export type FxNumKey = string;
 export type FxChoiceKey = 'filterType' | 'chorusMode' | 'phaserStages';
+export type ControlSpec = PageControl;
+export type FxCardSpec = PageFxModule;
+export type CouplingControl = PageCoupling;
+export type TargetGroup = PageTargetGroup;
+export const FX_TARGET = 'fx';
 
-export interface ControlSpec<K extends string = string> extends Scale {
-  k: K;
-  name: string;
-  step: number;
+/** One card per effect module, in the order the chain runs. */
+export const fxCards = (): FxCardSpec[] => pageModel().fxModules;
+export const couplingControls = (): CouplingControl[] => pageModel().couplingControls;
+export const lfoShapeLabels = (): Record<string, string> => pageModel().lfoShapeLabels;
+export const lfoRateScale = (): Scale => pageModel().lfoRate;
+export const lfoPhaseScale = (): ControlSpec => control(pageModel().lfoPhase);
+export const routeDepthScale = (): ControlSpec => control(pageModel().routeDepth);
+export const targetGroups = (domain: Domain): TargetGroup[] => pageModel().targetGroups[domain];
+
+function control(s: PageScale): ControlSpec {
+  return { k: s.k ?? '', name: s.name ?? '', min: s.min, max: s.max, step: s.step ?? (s.max - s.min) / LOG_STEPS, exp: s.exp };
 }
 
-export interface FxChoiceSpec {
-  k: FxChoiceKey;
-  name: string;
-  options: { value: string; label: string; group?: string }[];
+/** Which filter rows a type uses, and what its frequency/Q mean. */
+export function filterControls(type: string): PageFilterControls {
+  return pageModel().filterControls[type] ?? pageModel().filterControls.lowpass;
 }
-
-export interface FxCardSpec {
-  on: FxOnKey;
-  title: string;
-  tag: string;
-  choices: FxChoiceSpec[];
-  sliders: ControlSpec<FxNumKey>[];
-}
-
-function fx(k: FxModParam, name: string, step: number): ControlSpec<FxNumKey> {
-  const [min, max] = FX_PARAM_RANGES[k];
-  return { k, name, min, max, step, exp: FX_EXP_PARAMS.has(k) || undefined };
-}
-
-const FILTER_LABELS: Record<FilterType, string> = {
-  lowpass: 'Low-pass', highpass: 'High-pass', bandpass: 'Band-pass', notch: 'Notch', peaking: 'Peaking',
-  lowshelf: 'Low-shelf', highshelf: 'High-shelf', allpass: 'All-pass', formant: 'Formant (vowel)', comb: 'Comb',
-};
-
-export const FX_CARDS: readonly FxCardSpec[] = [
-  {
-    on: 'filterOn', title: 'Filter', tag: 'biquad · formant · comb',
-    choices: [{
-      k: 'filterType', name: 'Type',
-      options: FILTER_TYPES.map((t) => ({ value: t, label: FILTER_LABELS[t], group: t === 'formant' || t === 'comb' ? 'Character' : 'Biquad' })),
-    }],
-    sliders: [
-      fx('filterFreq', 'Cutoff (Hz)', 1), fx('filterQ', 'Q', 0.1), fx('filterGain', 'Gain (dB)', 0.1),
-      fx('filterVowel', 'Vowel (A–U)', 0.01), fx('filterCombFb', 'Feedback', 0.01),
-    ],
-  },
-  {
-    on: 'chorusOn', title: 'Chorus / Flanger', tag: 'modulated delay',
-    choices: [{ k: 'chorusMode', name: 'Mode', options: CHORUS_MODES.map((m) => ({ value: m, label: m === 'chorus' ? 'Chorus' : 'Flanger' })) }],
-    sliders: [fx('chorusRate', 'Rate (Hz)', 0.01), fx('chorusDepth', 'Depth (ms)', 0.1), fx('chorusMix', 'Mix (dry↔wet)', 0.01), fx('chorusFb', 'Feedback', 0.01)],
-  },
-  {
-    on: 'phaserOn', title: 'Phaser', tag: 'all-pass stages',
-    choices: [{ k: 'phaserStages', name: 'Stages', options: PHASER_STAGES.map((n) => ({ value: String(n), label: String(n) })) }],
-    sliders: [fx('phaserRate', 'Rate (Hz)', 0.01), fx('phaserDepth', 'Depth', 0.01), fx('phaserFb', 'Feedback', 0.01), fx('phaserMix', 'Mix (dry↔wet)', 0.01)],
-  },
-  {
-    on: 'delayOn', title: 'Delay / Echo', tag: 'feedback loop',
-    choices: [],
-    sliders: [fx('delayTime', 'Time (s)', 0.01), fx('delayFb', 'Feedback', 0.01), fx('delayMix', 'Mix (dry↔wet)', 0.01), fx('delayShimmer', 'Shimmer (octave up)', 0.01)],
-  },
-  {
-    on: 'reverbOn', title: 'Reverb', tag: 'convolver',
-    choices: [],
-    sliders: [
-      { k: 'reverbDecay', name: 'Decay (s)', min: REVERB_DECAY_RANGE[0], max: REVERB_DECAY_RANGE[1], step: 0.1 },
-      fx('reverbMix', 'Mix (dry↔wet)', 0.01),
-    ],
-  },
-  {
-    on: 'limiterOn', title: 'Limiter', tag: 'anti-clip',
-    choices: [],
-    sliders: [fx('limiterThr', 'Threshold (dB)', 0.5), fx('limiterRel', 'Release (s)', 0.01)],
-  },
-];
 
 export function fxChoiceValue(state: Readonly<FxState>, k: FxChoiceKey): string {
   return String(state[k]);
 }
 
-/** Sets a choice from a <select>'s value; anything the engine doesn't know is ignored. */
+/** Sets a choice from a <select>'s value; anything the engine doesn't offer is ignored. */
 export function setFxChoice(state: FxState, k: FxChoiceKey, value: string): void {
-  if (k === 'filterType') {
-    if (isFilterType(value)) state.filterType = value;
-  } else if (k === 'chorusMode') {
-    if (isChorusMode(value)) state.chorusMode = value;
-  } else {
-    const n = Number(value);
-    if (PHASER_STAGES.includes(n)) state.phaserStages = n;
-  }
+  const choice = pageModel().fxModules.flatMap((m) => m.choices).find((c) => c.k === k);
+  if (!choice?.options.some((o) => o.value === value)) return;
+  if (k === 'phaserStages') state.phaserStages = Number(value);
+  else if (k === 'filterType' && isFilterType(value)) state.filterType = value;
+  else if (k === 'chorusMode' && isChorusMode(value)) state.chorusMode = value;
 }
 
-export interface FilterControls {
-  q: boolean;
-  gain: boolean;
-  vowel: boolean;
-  comb: boolean;
-  freqLabel: string;
-  qLabel: string;
+function isFilterType(v: string): v is FilterType {
+  return coreSchema().filterTypes.includes(v);
+}
+function isChorusMode(v: string): v is ChorusMode {
+  return coreSchema().chorusModes.includes(v);
 }
 
-const BIQUAD: readonly FilterType[] = ['lowpass', 'highpass', 'bandpass', 'notch', 'peaking', 'lowshelf', 'highshelf', 'allpass'];
-
-/** Which filter rows a type uses, and what its frequency/Q mean (formula-synth's rules). */
-export function filterControls(type: FilterType): FilterControls {
-  const centred = type === 'bandpass' || type === 'notch' || type === 'peaking' || type === 'allpass';
-  return {
-    q: BIQUAD.includes(type) || type === 'formant',
-    gain: type === 'peaking' || type === 'lowshelf' || type === 'highshelf',
-    vowel: type === 'formant',
-    comb: type === 'comb',
-    freqLabel: type === 'comb' ? 'Pitch (Hz)' : type === 'formant' ? 'Formant shift (Hz)' : centred ? 'Frequency (Hz)' : 'Cutoff (Hz)',
-    qLabel: type === 'formant' ? 'Resonance' : 'Q',
-  };
+// The core names fields by string; these read and write them only where the
+// point has a field of that kind, so a name the page does not know is a no-op.
+export function fxNumber(fx: Readonly<FxState>, k: string): number {
+  const v: unknown = Reflect.get(fx, k);
+  return typeof v === 'number' ? v : NaN;
 }
-
-const VOWELS = ['A', 'E', 'I', 'O', 'U'];
-
-export function vowelLabel(v: number): string {
-  return VOWELS[clamp(Math.round(v * 4), 0, 4)];
+export function setFxNumber(fx: FxState, k: string, v: number): void {
+  if (typeof Reflect.get(fx, k) === 'number') Reflect.set(fx, k, v);
 }
-
-// ---------------------------------------------------------------------------
-// Formulas
-
-export function enabledFormulas(state: Readonly<AppState>): number {
-  return FORMULAS.filter((f) => state.audio.formulas[f.id]?.enabled).length;
+export function fxFlag(fx: Readonly<FxState>, k: string): boolean {
+  return Reflect.get(fx, k) === true;
 }
-
-/** More than MAX_ENABLED_FORMULAS turns into mush — evolution keeps to it, and so does the page. */
-export function canEnableFormula(state: Readonly<AppState>, id: string): boolean {
-  return state.audio.formulas[id]?.enabled === true || enabledFormulas(state) < MAX_ENABLED_FORMULAS;
+export function setFxFlag(fx: FxState, k: string, on: boolean): void {
+  if (typeof Reflect.get(fx, k) === 'boolean') Reflect.set(fx, k, on);
 }
-
-// ---------------------------------------------------------------------------
-// Sound → image
-
-export interface CouplingControl extends ControlSpec<CouplingKey> {
-  /** 'offset': a signed nudge to one card param; 'effect': a display effect (kept ≥ 1.2 in total by evolution). */
-  kind: 'offset' | 'effect';
-}
-
-export const COUPLING_CONTROLS: readonly CouplingControl[] = COUPLING_KEYS.map((k) => ({
-  k,
-  name: COUPLING_LABELS[k],
-  min: COUPLING_RANGES[k][0],
-  max: COUPLING_RANGES[k][1],
-  step: 0.01,
-  kind: EXPLICIT_COUPLING_KEYS.some((e) => e === k) ? 'effect' : 'offset',
-}));
-
-// ---------------------------------------------------------------------------
-// Modulation. The LFO pool is shared by sound and picture; each tab lists
-// the routes of its own side.
-
-export type Domain = 'sound' | 'picture';
-export const FX_TARGET = 'fx';
-
-export const LFO_RATE_SCALE: Scale = { min: LFO_RATE_RANGE[0], max: LFO_RATE_RANGE[1], exp: true };
-export const LFO_PHASE_SCALE: ControlSpec = { k: 'phase', name: 'Phase', min: 0, max: 1, step: 0.01 };
-export const ROUTE_DEPTH_SCALE: ControlSpec = { k: 'depth', name: 'Depth', min: -1, max: 1, step: 0.01 };
-const NEW_ROUTE_DEPTH = 0.2;
-
-export const LFO_SHAPE_LABELS: Readonly<Record<LfoShape, string>> = {
-  sine: 'Sine', triangle: 'Triangle', saw: 'Saw', square: 'Square', random: 'Random (S&H)', pink: 'Pink (1/f)',
-};
-
-export function routeDomain(target: string): Domain {
-  return isCardId(target) ? 'picture' : 'sound';
-}
-
-export interface TargetParam {
-  k: string;
-  name: string;
-  exp: boolean;
-}
-
-export interface TargetGroup {
-  id: string;
-  title: string;
-  params: TargetParam[];
-}
-
-function paramsOf(target: string): TargetParam[] {
-  return MOD_TARGETS.filter((t) => t.target === target).map((t) => ({
-    k: t.param,
-    name: target === FX_TARGET ? t.label : t.label.slice(t.label.indexOf(' · ') + 3),
-    exp: t.exp,
-  }));
-}
-
-/** What a route on this side can aim at: formulas then the effects, or the picture's cards. */
-export function targetGroups(domain: Domain): TargetGroup[] {
-  if (domain === 'picture') return CARDS.map((c) => ({ id: c.id, title: c.title, params: paramsOf(c.id) }));
-  return [
-    ...FORMULAS.map((f) => ({ id: f.id, title: f.title, params: paramsOf(f.id) })),
-    { id: FX_TARGET, title: 'Effects', params: FX_MOD_PARAMS.map((p) => ({ k: p, name: FX_PARAM_LABELS[p], exp: FX_EXP_PARAMS.has(p) })) },
-  ];
-}
-
-/** Whether a route's target is audible/visible now (its formula or card is on; effects always are). */
-export function isTargetOn(state: Readonly<AppState>, target: string): boolean {
-  if (target === FX_TARGET) return true;
-  if (isFormulaId(target)) return state.audio.formulas[target]?.enabled === true;
-  if (ALWAYS_ON_CARD_IDS.some((id) => id === target)) return true;
-  return state.visual.cards[target]?.on === true;
-}
-
-export function canAddRoute(state: Readonly<AppState>): boolean {
-  return state.mod.routes.length < ROUTE_SLOTS;
-}
-
-/** A fresh route for one side: LFO 1 on the first thing that is on there. */
-export function newRoute(state: Readonly<AppState>, domain: Domain): ModRoute {
-  const groups = targetGroups(domain);
-  const group = groups.find((g) => g.id !== FX_TARGET && isTargetOn(state, g.id)) ?? groups[groups.length - 1];
-  const param = group.params[0];
-  const route: ModRoute = { src: 0, target: group.id, param: param.k, depth: NEW_ROUTE_DEPTH };
-  if (param.exp) route.exp = true;
-  return route;
-}
-
-/** The octave flag the schema gives a target (frequency-like params move in octaves). */
-export function targetExp(target: string, param: string): boolean {
-  const i = modTargetIndex(target, param);
-  return i >= 0 && MOD_TARGETS[i].exp;
-}
-
-/** `target.param` of every route that moves something — those sliders get a ∿. */
-export function modulatedKeys(routes: readonly ModRoute[]): Set<string> {
-  return new Set(routes.filter((r) => r.depth !== 0).map((r) => `${r.target}.${r.param}`));
-}
-
-// ---------------------------------------------------------------------------
-
-/** Same point for every gene, up to the genome codec's float noise; volume and name don't count. */
-export function samePoint(a: Readonly<AppState>, b: Readonly<AppState>): boolean {
-  const key = (s: Readonly<AppState>): string => canonicalJson(JSON.parse(JSON.stringify(
-    {
-      fx: s.audio.fx, formulas: s.audio.formulas, visual: s.visual, coupling: s.coupling,
-      lfos: s.mod.lfos, routes: s.mod.routes.map((r) => ({ ...r, exp: r.exp === true })),
-    },
-    (_k, v: unknown) => (typeof v === 'number' ? Number(v.toPrecision(9)) : v),
-  )));
-  return key(a) === key(b);
+export function couplingValue(c: Readonly<Record<string, number>>, k: string): number {
+  return c[k] ?? 0;
 }

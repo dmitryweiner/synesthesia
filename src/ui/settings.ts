@@ -9,22 +9,23 @@
 // nothing for the picture — the frame loop is paused while the page is
 // open, so picture changes show when it closes. Closing is main.ts's job
 // (it commits the point as one undoable step).
-import type { AppState } from '../state/schema';
-import { FORMULAS, MAX_ENABLED_FORMULAS } from '../schema/audio';
-import { ALWAYS_ON_CARD_IDS, CARDS } from '../schema/visual';
-import { FX_PRESETS, applyFxPreset } from '../fxPresets';
+import type { AppState } from '../state/types';
 import { make } from './dom';
 import { setupAdjustmentButtons } from './adjust';
 import { card, fillSelect, selectRow, sliderRow } from './controls';
 import type { Card } from './controls';
 import { ModPanel } from './modPanel';
 import {
-  COUPLING_CONTROLS, FX_CARDS, canEnableFormula, filterControls, fxChoiceValue, modulatedKeys,
-  setFxChoice, vowelLabel,
+  applyFxPreset, canEnableFormula, coreSchema, couplingControls, couplingValue, filterControls, fxCards,
+  fxChoiceValue, fxFlag, fxNumber, fxPresets, modulatedKeys, setFxChoice, setFxFlag, setFxNumber, vowelLabel,
 } from './settingsModel';
-import type { FxNumKey } from './settingsModel';
+import type { FxChoiceKey, FxNumKey } from './settingsModel';
 
 export type SettingsTab = 'audio' | 'video';
+
+function choiceKey(k: string): FxChoiceKey {
+  return k === 'chorusMode' || k === 'phaserStages' ? k : 'filterType';
+}
 
 export interface SettingsHandlers {
   /** Something audible changed (formulas, effects, LFOs, routes to sound). */
@@ -190,6 +191,7 @@ export class SettingsPage {
     pane.appendChild(master.row);
     this.volumeSync = master.sync;
 
+    const { formulas: FORMULAS, maxEnabledFormulas: MAX_ENABLED_FORMULAS } = coreSchema();
     const head = section(pane, 'Formulas', `up to ${MAX_ENABLED_FORMULAS} at once`);
     const offAll = make('button', 'mini-btn', 'Switch all off');
     offAll.type = 'button';
@@ -252,16 +254,15 @@ export class SettingsPage {
     this.fxPreset.id = 'setFxPreset';
     fillSelect(this.fxPreset, [
       { value: '', label: '— configure one effect —' },
-      ...FX_PRESETS.map((p) => ({ value: p.name, label: p.name, group: p.group })),
+      ...fxPresets().map((p, i) => ({ value: String(i), label: p.name, group: p.group })),
     ]);
     presetLab.appendChild(this.fxPreset);
     fxHead.appendChild(presetLab);
     const fxGrid = grid(pane);
     const fxSyncs: (() => void)[] = [];
     this.fxPreset.addEventListener('change', () => {
-      const preset = FX_PRESETS.find((p) => p.name === this.fxPreset.value);
-      if (!preset) return;
-      Object.assign(this.state.audio.fx, applyFxPreset(this.state.audio.fx, preset));
+      if (this.fxPreset.value === '') return;
+      Object.assign(this.state.audio.fx, applyFxPreset(this.state.audio.fx, Number(this.fxPreset.value)));
       for (const s of fxSyncs) s();
       this.sound();
     });
@@ -271,13 +272,13 @@ export class SettingsPage {
       this.sound();
     };
 
-    for (const spec of FX_CARDS) {
+    for (const spec of fxCards()) {
       const fx = () => this.state.audio.fx;
       const c = card({
         id: `setFx_${spec.on}`,
         title: spec.title,
         tag: spec.tag,
-        toggle: { get: () => fx()[spec.on], set: (on) => { fx()[spec.on] = on; fxEdited(); } },
+        toggle: { get: () => fxFlag(fx(), spec.on), set: (on) => { setFxFlag(fx(), spec.on, on); fxEdited(); } },
       });
       const rows = new Map<FxNumKey, ReturnType<typeof sliderRow>>();
       for (const ch of spec.choices) {
@@ -285,9 +286,9 @@ export class SettingsPage {
           id: `setFx_${ch.k}`,
           label: ch.name,
           options: ch.options,
-          get: () => fxChoiceValue(fx(), ch.k),
+          get: () => fxChoiceValue(fx(), choiceKey(ch.k)),
           set: (v) => {
-            setFxChoice(fx(), ch.k, v);
+            setFxChoice(fx(), choiceKey(ch.k), v);
             if (ch.k === 'filterType') showFilterRows();
             fxEdited();
           },
@@ -300,8 +301,8 @@ export class SettingsPage {
           id: `setFx_${s.k}`,
           label: s.name,
           scale: s,
-          get: () => fx()[s.k],
-          set: (v) => { fx()[s.k] = v; fxEdited(); },
+          get: () => fxNumber(fx(), s.k),
+          set: (v) => { setFxNumber(fx(), s.k, v); fxEdited(); },
           format: s.k === 'filterVowel' ? vowelLabel : undefined,
           modKey: s.k === 'reverbDecay' ? undefined : `fx.${s.k}`,
         });
@@ -342,9 +343,10 @@ export class SettingsPage {
 
     section(pane, 'Image', 'reaction–diffusion, flow and colour');
     const cards = grid(pane);
+    const { cards: CARDS, alwaysOnCardIds } = coreSchema();
     for (const def of CARDS) {
       const cs = () => this.state.visual.cards[def.id];
-      const alwaysOn = ALWAYS_ON_CARD_IDS.some((id) => id === def.id);
+      const alwaysOn = alwaysOnCardIds.some((id) => id === def.id);
       const c = card({
         id: `setV_${def.id}`,
         title: def.title,
@@ -390,13 +392,13 @@ export class SettingsPage {
     ] as const;
     for (const g of groups) {
       const c = card({ id: `setC_${g.kind}`, title: g.title, tag: g.tag, desc: g.desc });
-      for (const ctl of COUPLING_CONTROLS.filter((x) => x.kind === g.kind)) {
+      for (const ctl of couplingControls().filter((x) => x.kind === g.kind)) {
         const row = sliderRow({
           id: `setC_${ctl.k}`,
           label: ctl.name,
           scale: ctl,
-          get: () => this.state.coupling[ctl.k],
-          set: (v) => { this.state.coupling[ctl.k] = v; },
+          get: () => couplingValue(this.state.coupling, ctl.k),
+          set: (v) => { Reflect.set(this.state.coupling, ctl.k, v); },
         });
         row.row.classList.add('wide-label');
         c.body.appendChild(row.row);

@@ -1,9 +1,10 @@
 // SimEngine: owns the GL context, the ping-pong state, and every GPU
-// program (seed/react/display/velocity/advect/paramfield/inject). Per rendered
-// frame: refresh paramfield + velocity, run `reaction.speed` Gray-Scott
-// substeps, then one advection substep. No determinism is attempted —
-// reseed() re-rolls Math.random(). Ported from chromaflux without the
-// Veins/Pour/Brush layers.
+// program (seed/react/display/velocity/advect/paramfield/inject). It draws
+// what the core's picture driver decides (PLAN-CORE.md phase 5, syn-wasm
+// WebPicture → src/core/picture.ts): per frame, the injects, then
+// paramfield + velocity, the reaction's substeps and one advection substep,
+// then the display pass. The seed spots come from the core too. The shaders
+// are the core's (C10), from the package built at the pinned revision.
 //
 // None of those passes is cheap where there is no GPU (a 1080p board with
 // only a display controller renders all of them on the same CPU cores), so
@@ -18,23 +19,22 @@
 import { createGL2, createProgram, composeFragmentShader } from '../gl/context';
 import { PingPongTarget, SingleTarget, createZeroTexture } from '../gl/pingpong';
 import { FULLSCREEN_VERT, runPass, u1f, u1i, u2f, u2fv, u3f, u4fv, utex } from '../gl/quad';
-import type { PaletteUniforms } from '../palette';
-import type { DisplayFx } from '../visualFx';
-import { MAX_RIPPLES, NEUTRAL_DISPLAY } from '../visualFx';
-import { fieldGridSize } from './grid';
-import type { FieldVariationParams, FlowParams, ReactionParams } from './params';
-import { DEFAULT_REACTION_PARAMS, ZERO_FIELD_VARIATION, ZERO_FLOW, advectActive, paramFieldActive } from './params';
-import commonGlsl from './shaders/common.glsl?raw';
-import seedFrag from './shaders/seed.frag?raw';
-import reactFrag from './shaders/react.frag?raw';
-import displayFrag from './shaders/display.frag?raw';
-import velocityFrag from './shaders/velocity.frag?raw';
-import advectFrag from './shaders/advect.frag?raw';
-import paramfieldFrag from './shaders/paramfield.frag?raw';
-import injectFrag from './shaders/inject.frag?raw';
+import { packRipples, type PictureFrame, type SeedSpots } from '../core/picture';
+import { fieldGrid, maxRipples, maxSeedSpots } from '../core/pkg/syn_wasm.js';
+import commonGlsl from '../core/pkg/shaders/common.glsl?raw';
+import seedFrag from '../core/pkg/shaders/seed.frag?raw';
+import reactFrag from '../core/pkg/shaders/react.frag?raw';
+import displayFrag from '../core/pkg/shaders/display.frag?raw';
+import velocityFrag from '../core/pkg/shaders/velocity.frag?raw';
+import advectFrag from '../core/pkg/shaders/advect.frag?raw';
+import paramfieldFrag from '../core/pkg/shaders/paramfield.frag?raw';
+import injectFrag from '../core/pkg/shaders/inject.frag?raw';
 
-const MAX_SPOTS = 24;
-const LIGHT_Z = 0.6;
+/** The paramfield and velocity textures: half the grid each side. */
+function fieldGridSize(g: { width: number; height: number }): { width: number; height: number } {
+  const [width, height] = fieldGrid(g.width, g.height);
+  return { width, height };
+}
 
 /**
  * True when `key` already holds `next`; otherwise copies `next` in and
@@ -52,15 +52,6 @@ function unchanged(key: Float64Array, next: readonly number[]): boolean {
   return same;
 }
 
-/** The display pass's light vector. Trig on a uniform, per pixel, is not free. */
-function lightDir(angle: number): [number, number, number] {
-  const x = Math.cos(angle);
-  const y = Math.sin(angle);
-  const len = Math.hypot(x, y, LIGHT_Z);
-  return [x / len, y / len, LIGHT_Z / len];
-}
-
-const EVOLVE_DT = 1 / 60; // nominal frame time; evolveT is an aesthetic drift, not a clock
 
 export interface SimEngineOptions {
   canvas: HTMLCanvasElement;
@@ -70,14 +61,10 @@ export interface SimEngineOptions {
 
 export class SimEngine {
   readonly gl: WebGL2RenderingContext;
-  reaction: ReactionParams = { ...DEFAULT_REACTION_PARAMS };
-  fieldVariation: FieldVariationParams = { ...ZERO_FIELD_VARIATION };
-  flow: FlowParams = { ...ZERO_FLOW };
 
   private state: PingPongTarget;
   private velocity: SingleTarget;
   private paramField: SingleTarget;
-  private evolveT = 0;
   /** The uniforms each field texture currently holds; empty until it is drawn. */
   private readonly paramFieldKey = new Float64Array(8);
   private readonly velocityKey = new Float64Array(6);
@@ -91,7 +78,7 @@ export class SimEngine {
   private readonly advectProgram: WebGLProgram;
   private readonly paramfieldProgram: WebGLProgram;
   private readonly injectProgram: WebGLProgram;
-  private readonly noRipples = new Float32Array(MAX_RIPPLES * 4);
+  private readonly ripples: Float32Array<ArrayBuffer>;
   private readonly zeroField: WebGLTexture;
   private readonly syncPixel = new Uint8Array(4);
 
@@ -110,7 +97,7 @@ export class SimEngine {
     this.advectProgram = createProgram(gl, FULLSCREEN_VERT, composeFragmentShader(commonGlsl, advectFrag));
     this.paramfieldProgram = createProgram(gl, FULLSCREEN_VERT, composeFragmentShader(commonGlsl, paramfieldFrag));
     this.injectProgram = createProgram(gl, FULLSCREEN_VERT, composeFragmentShader(commonGlsl, injectFrag));
-    this.reseed();
+    this.ripples = new Float32Array(maxRipples() * 4);
   }
 
   /** Grid width / height: noise and seed spots are laid out in aspect-corrected UV. */
@@ -118,18 +105,15 @@ export class SimEngine {
     return this.state.width / this.state.height;
   }
 
-  /** Paints a fresh random start into BOTH buffers. */
-  reseed(): void {
-    const spotCount = MAX_SPOTS - Math.floor(Math.random() * 6);
-    const spots = new Float32Array(MAX_SPOTS * 2);
-    for (let i = 0; i < spotCount; i++) {
-      spots[i * 2] = Math.random();
-      spots[i * 2 + 1] = Math.random();
-    }
+  /** Paints a fresh start from the core's seed spots into BOTH buffers. */
+  reseed(seed: SeedSpots): void {
+    const max = maxSeedSpots();
+    const spots = new Float32Array(max * 2);
+    spots.set(seed.xy.slice(0, max * 2));
     const uniforms = {
-      uSpotCount: u1i(spotCount),
+      uSpotCount: u1i(Math.min(seed.count, max)),
       uSpots: u2fv(spots),
-      uSpotRadius: u1f(0.02 + Math.random() * 0.03),
+      uSpotRadius: u1f(seed.radius),
       uAspect: u1f(this.aspect),
     };
     runPass(this.gl, this.seedProgram, uniforms, this.state.writeTarget);
@@ -141,25 +125,23 @@ export class SimEngine {
   /**
    * The feed/kill offset texture to hand to the reaction — redrawn only when
    * it would come out different. Ten fbm4 evaluations per cell, so "it would
-   * come out all zeros anyway" is worth a branch.
+   * come out all zeros anyway" (the core's `active`) is worth a branch.
    */
-  private updateParamField(): WebGLTexture {
-    const f = this.fieldVariation;
-    if (!paramFieldActive(f)) return this.zeroField;
+  private updateParamField(f: PictureFrame): WebGLTexture {
+    const v = f.fieldVariation;
+    if (!v.active) return this.zeroField;
     const same = unchanged(this.paramFieldKey, [
-      f.feedVarAmount, f.feedVarScale, f.feedVarWarp,
-      f.killVarAmount, f.killVarScale, f.killVarWarp,
-      this.evolveT, this.aspect,
+      v.feedAmount, v.feedScale, v.feedWarp, v.killAmount, v.killScale, v.killWarp, f.evolveT, this.aspect,
     ]);
     if (same && this.paramFieldDrawn) return this.paramField.texture;
     runPass(this.gl, this.paramfieldProgram, {
-      uFeedVarAmount: u1f(f.feedVarAmount),
-      uFeedVarScale: u1f(f.feedVarScale),
-      uFeedVarWarp: u1f(f.feedVarWarp),
-      uKillVarAmount: u1f(f.killVarAmount),
-      uKillVarScale: u1f(f.killVarScale),
-      uKillVarWarp: u1f(f.killVarWarp),
-      uEvolveT: u1f(this.evolveT),
+      uFeedVarAmount: u1f(v.feedAmount),
+      uFeedVarScale: u1f(v.feedScale),
+      uFeedVarWarp: u1f(v.feedWarp),
+      uKillVarAmount: u1f(v.killAmount),
+      uKillVarScale: u1f(v.killScale),
+      uKillVarWarp: u1f(v.killWarp),
+      uEvolveT: u1f(f.evolveT),
       uAspect: u1f(this.aspect),
     }, this.paramField.target);
     this.paramFieldDrawn = true;
@@ -167,40 +149,39 @@ export class SimEngine {
   }
 
   /** Same deal for the advection velocity; only called when advection runs. */
-  private updateVelocity(): void {
-    const flow = this.flow;
+  private updateVelocity(f: PictureFrame): void {
+    const flow = f.flow;
     const same = unchanged(this.velocityKey, [
-      flow.curlStrength, flow.curlScale, flow.driftX, flow.driftY,
-      this.evolveT, this.aspect,
+      flow.curlStrength, flow.curlScale, flow.driftX, flow.driftY, f.evolveT, this.aspect,
     ]);
     if (same && this.velocityDrawn) return;
-    // Canvas UV is Y-up, so "down" (what a positive Drift Y should mean) is -Y.
     runPass(this.gl, this.velocityProgram, {
       uCurlStrength: u1f(flow.curlStrength),
       uCurlScale: u1f(flow.curlScale),
-      uDrift: u2f(flow.driftX, -flow.driftY),
-      uEvolveT: u1f(this.evolveT),
+      uDrift: u2f(flow.driftX, flow.driftY), // already Y-up
+      uEvolveT: u1f(f.evolveT),
       uAspect: u1f(this.aspect),
     }, this.velocity.target);
     this.velocityDrawn = true;
   }
 
-  /** Refreshes paramfield/velocity, runs `reaction.speed` substeps, then one advection substep. */
-  step(): void {
-    this.evolveT += this.flow.evolveRate * EVOLVE_DT;
-    const paramField = this.updateParamField();
-    const advecting = advectActive(this.flow);
-    if (advecting) this.updateVelocity();
+  /** One frame of the simulation: the injects, then paramfield/velocity,
+   *  the reaction's substeps and one advection substep. */
+  step(f: PictureFrame): void {
+    for (const [x, y, radius, amount] of f.injects) this.inject([x, y], radius, amount);
+    const paramField = this.updateParamField(f);
+    const advecting = f.flow.advecting;
+    if (advecting) this.updateVelocity(f);
 
-    const substeps = Math.max(1, Math.round(this.reaction.speed));
-    for (let i = 0; i < substeps; i++) {
+    const rx = f.reaction;
+    for (let i = 0; i < Math.max(1, rx.substeps); i++) {
       runPass(this.gl, this.reactProgram, {
         uState: utex(this.state.readTexture, 0),
         uParamField: utex(paramField, 1),
-        uFeed: u1f(this.reaction.feed),
-        uKill: u1f(this.reaction.kill),
-        uDiffU: u1f(this.reaction.diffU),
-        uDiffV: u1f(this.reaction.diffV),
+        uFeed: u1f(rx.feed),
+        uKill: u1f(rx.kill),
+        uDiffU: u1f(rx.diffU),
+        uDiffV: u1f(rx.diffV),
         uDt: u1f(1.0),
       }, this.state.writeTarget);
       this.state.swap();
@@ -210,13 +191,13 @@ export class SimEngine {
       runPass(this.gl, this.advectProgram, {
         uState: utex(this.state.readTexture, 0),
         uVelocity: utex(this.velocity.texture, 1),
-        uAdvectAmount: u1f(this.flow.advectAmount),
+        uAdvectAmount: u1f(f.flow.advectAmount),
       }, this.state.writeTarget);
       this.state.swap();
     }
   }
 
-  /** Drops fresh "ink" into a disc at uv (0..1, Y-up) — onset seeding. amount 0..1. */
+  /** Drops fresh "ink" into a disc at uv (0..1, Y-up). amount 0..1. */
   inject(uv: readonly [number, number], radius: number, amount: number): void {
     runPass(this.gl, this.injectProgram, {
       uState: utex(this.state.readTexture, 0),
@@ -228,29 +209,27 @@ export class SimEngine {
     this.state.swap();
   }
 
-  /**
-   * Draws the current state to the canvas (default framebuffer), with the
-   * explicit sound→image display effects and packed ripples (RippleSet.pack).
-   */
-  render(palette: PaletteUniforms, fx: Readonly<DisplayFx> = NEUTRAL_DISPLAY, ripples?: Float32Array): void {
+  /** Draws the current state to the canvas (default framebuffer) with the
+   *  frame's palette, sound→image display effects and ripples. */
+  render(f: PictureFrame): void {
     const texel: readonly [number, number] = [1 / this.state.width, 1 / this.state.height];
-    const light = lightDir(palette.lightAngle);
+    const { palette: pal, display: fx } = f;
     runPass(this.gl, this.displayProgram, {
       uState: utex(this.state.readTexture, 0),
       uTexel: u2f(texel[0], texel[1]),
-      uPalA: u3f(palette.a[0], palette.a[1], palette.a[2]),
-      uPalB: u3f(palette.b[0], palette.b[1], palette.b[2]),
-      uPalC: u3f(palette.c[0], palette.c[1], palette.c[2]),
-      uPalD: u3f(palette.d[0], palette.d[1], palette.d[2]),
-      uBands: u1f(palette.bands),
-      uRelief: u1f(palette.relief),
-      uLightDir: u3f(light[0], light[1], light[2]),
-      uGloss: u1f(palette.gloss),
+      uPalA: u3f(pal.a[0], pal.a[1], pal.a[2]),
+      uPalB: u3f(pal.b[0], pal.b[1], pal.b[2]),
+      uPalC: u3f(pal.c[0], pal.c[1], pal.c[2]),
+      uPalD: u3f(pal.d[0], pal.d[1], pal.d[2]),
+      uBands: u1f(pal.bands),
+      uRelief: u1f(pal.relief),
+      uLightDir: u3f(pal.lightDir[0], pal.lightDir[1], pal.lightDir[2]),
+      uGloss: u1f(pal.gloss),
       uAspect: u1f(this.aspect),
       uExposure: u1f(fx.exposure),
       uFlash: u1f(fx.flash),
       uTint: u3f(fx.tint[0], fx.tint[1], fx.tint[2]),
-      uRipples: u4fv(ripples ?? this.noRipples),
+      uRipples: u4fv(packRipples(f, this.ripples)),
     }, null);
   }
 

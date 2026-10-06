@@ -4,7 +4,7 @@
 // see cloud/), and only { id, name } stays in this browser: a whole point is
 // ~4.4 KB against ~37 bytes here, and the localStorage quota is shared by
 // every app on the origin (PLAN.md decision 10).
-import { isPresetId } from './canonical';
+import { isPointId } from '../core/point';
 import { readJson, writeJson } from './store';
 import type { SaveResult } from './store';
 
@@ -18,7 +18,7 @@ export interface SavedPoint {
 function isSavedPoint(u: unknown): u is SavedPoint {
   if (typeof u !== 'object' || u === null) return false;
   const id: unknown = Reflect.get(u, 'id');
-  return typeof id === 'string' && isPresetId(id) && typeof Reflect.get(u, 'name') === 'string';
+  return typeof id === 'string' && isPointId(id) && typeof Reflect.get(u, 'name') === 'string';
 }
 
 export function loadLibrary(): SavedPoint[] {

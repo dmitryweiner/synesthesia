@@ -7,18 +7,31 @@ Synesthesia: one point in a ~500-gene space generates sound (formula
 generators + FX, ported from [../formula-synth](../formula-synth/)) and an
 image (Gray–Scott reaction-diffusion, ported from
 [../chromaflux](../chromaflux/)) at the same time; the user steers the
-search with 👍/👎. Decisions agreed with the user live in **PLAN.md** — read
+search with 👍/👎. **The model is the shared Rust core**
+([../synesthesia-core](../synesthesia-core/), as wasm): the point, the
+sound, the analysis, the genome and the search, the picture's decisions,
+the presets, the settings' data. This repo is the web shell around it —
+the page, WebGL drawing, Web Audio plumbing, storage, the points Worker.
+A change to how anything *sounds, evolves or is valued* is made in the
+core and arrives here by bumping the pin (PLAN-CORE.md C2). Decisions agreed with the user live in **PLAN.md** — read
 it before changing behavior. Proposals that are *not* agreed yet (sound
 mechanics, missing measurements, with the numbers behind them) live in
-**PLAN-IMPROVEMENTS.md**. The move onto the shared Rust core
-([../synesthesia-core](../synesthesia-core/)) is planned in
-**PLAN-CORE.md**. README.md is the human-facing spec. UI, docs
+**PLAN-IMPROVEMENTS.md**. The move onto the core is recorded in
+**PLAN-CORE.md** (decisions C1–C13, the measurements behind them). README.md is the human-facing spec. UI, docs
 and code comments are in English.
 
 ## Commands
 
 ```bash
 npm run check     # tsc --noEmit && eslint . && vitest run — after every change
+npm run core      # build syn-wasm at the rev pinned in
+                  # package.json into src/core/pkg/ (never committed); check/dev/
+                  # build/smoke run it first. Rust + wasm32 target + wasm-pack.
+                  # SYN_CORE_DIR=../synesthesia-core builds a working tree instead
+npm run bench:core  # phase 0 gate: each preset's share of the audio budget in the
+                  # worklet, then the heaviest live while the picture draws
+npm run bench:serve # HTTPS dev server on the LAN: open /core-bench.html on a phone
+                  # (self-signed: accept the warning). Stop it when done
 npm run smoke     # Playwright: boot, sound, 👍/👎/🎲/undo, every preset,
                   # ?preset=N, save+reload, share link in a 2nd tab, scout,
                   # ⚙ Settings (picture paused, sound heard, one undo step).
@@ -28,29 +41,20 @@ npm run snap -- --out shots/x.png [--preset N] [--sound] [--like N] [--dislike N
                   [--settings audio|video] [--scroll px]  # ⚙ Settings, pane scrolled
                   [--reseed] [--stroke x0,y0,x1,y1]  # drag on a clean field:
                   #   the only way to see what a touch actually painted
-npm run analyze   # fractality of the real sound (see "Sound analysis" below);
-                  # --onsets: onset hits per preset at 60/30/15 fps (the
-                  #   picture seeds growth on every hit — tune the detector here);
-                  # --switch 0,3,10 --at 12: clicks at preset switches;
-                  # --configs 30@22050,24@8000: does a cheap render rank like
-                  #   an expensive one (Spearman ρ)?;
-                  # --render [--grid 1024,256] [--scale 0,1280] [--size WxH]:
+npm run analyze -- --render [--grid 1024,256] [--scale 0,1280] [--size WxH]
                   #   FPS of the real rAF loop per configuration (--grid 0 =
                   #   let the boot probe choose, and see what it chose);
                   # --render --passes: ms per PASS — a 1-px readPixels is a
                   #   real barrier where gl.finish() is not, and timing step()
-                  #   at speed 1 vs 11 splits one react substep from the rest
-                  # --repeat N: mean ± sd over N seeded rooms (seeds 1..N,
-                  #   the same rooms for every point — renders are repeatable);
-                  # --png DIR: a log-frequency waterfall + loudness PNG per
-                  #   render — look at the sound;
+                  #   at 1 vs 11 substeps splits one react substep from the rest;
                   # --picture [--minutes 5 --every 30]: numbers for the
                   #   PICTURE per preset (coverage, edges, change; flags a
-                  #   pattern that died or froze), read from the sim state;
-                  # --character [--ref 0,3,5,6,8]: what KIND of sound
-                  #   (dropout, swing, low end, harmonicity, roughness,
-                  #   motion at 1 s / 10 s) and the distance to a group
-npm run build     # tsc + vite build into ./docs (GitHub Pages) — commit docs/
+                  #   pattern that died or froze), read from the sim state.
+                  # The SOUND is measured by synesthesia-core's syn-bench
+                  #   (fractality, --onsets, --switch, --configs, --repeat,
+                  #   --character/--ref, --wav, --png): PLAN-CORE.md C6
+npm run build     # core + tsc + vite build into ./dist; CI (.github/workflows/pages.yml)
+                  # builds and publishes it to GitHub Pages — nothing built is committed
 npm run check:cloud   # cloud/ Worker: tsc + Miniflare tests (npm install in cloud/ once)
 npm run deploy:cloud  # D1 migrations --remote + wrangler deploy (wrangler is authorized)
 ```
@@ -62,11 +66,11 @@ own; a server you start by hand (`npm run dev`, a snapshot's vite), you stop
 before the session ends — `pgrep -af '[b]in/vite'` must print nothing.
 Agreed decisions go into PLAN.md (numbered, dated) — the user asks for that.
 
-Three skills carry the routines: **`verify`** (which checks to run before a
-commit and how to read their failures), **`sound-check`** (how to measure
-the actual sound and tune thresholds on real renders) and **`new-preset`**
-(designing or retuning a preset: profile, variants, same-room comparisons,
-the picture over minutes, listening WAVs for the user).
+The **`verify`** skill carries the routine here (which checks to run before
+a commit and how to read their failures). Measuring the sound
+(**`sound-check`**) and making or retuning a preset (**`new-preset`**) are
+synesthesia-core's skills now — the sound and the presets live there
+(PLAN-CORE.md C2, C6).
 
 ## How work is done here — measure first
 
@@ -90,11 +94,15 @@ every guess cost a round trip:
 | what do the presets people liked most have in common? | `analyze.mjs --character --ref 0,3,5,6,8` | a band that never breaks (dropout 4–6 dB vs 8–12 for drips/bells/wind), low end 0.65–0.96 of the energy (vs 0.0–0.2), one harmonic grid, slow change |
 | did the render changes actually help? | `--render` / `--render --passes`, base vs new snapshots, interleaved | same configuration 2.0×; default point 0.57 → 10.8 fps |
 
+(The sound rows were measured on the old TypeScript model with
+`analyze.mjs`; the same questions are now answered by the core's
+`syn-bench` and tests — see its `sound-check` skill.)
+
 Corollaries:
-- A metric that runs in vitest beats one that needs a browser: the pure
-  `analyserSim.ts` lets unit tests run the *live* feature pipeline on
-  rendered audio.
-- Keep the bench: put it in `scripts/analyze.mjs` behind a flag, not in a
+- A metric that runs as a unit test beats one that needs a browser: the
+  core's tests run the live feature pipeline on rendered audio.
+- Keep the bench: put it behind a flag (`syn-bench` for sound,
+  `scripts/analyze.mjs` for the page's rendering and picture), not in a
   throwaway script — the next tuning session starts from numbers, not zero.
 - State thresholds as behaviour ("a bell every 4 s → 3–6 hits in 16 s"), so
   a future change that breaks the *feel* fails a test.
@@ -177,8 +185,9 @@ Corollaries:
   destroyed". Don't edit sources while it runs.
 - `page.reload()` kills the AudioContext: re-start sound before checking it.
 - ~5 fps headless means most onsets fall between frames: live probes
-  undercount hits. The 60 fps truth is `tests/onsets.test.ts` (pure
-  AnalyserNode emulation over real preset audio).
+  undercount hits. The truth is the core's `syn-core/tests/onsets.rs` and
+  `syn-bench --onsets` (the worklet posts every hit; the page reads them
+  with `hitHeard()`).
 - localStorage is shared by all tabs of a context: the last point written by
   one tab is what another tab's reload restores.
 
@@ -188,9 +197,11 @@ Corollaries:
   D1 `synesthesia-presets` (id 0a0f3551-69bb-4b0c-8e7f-7efe516a9535),
   rate-limit namespaces 2001/2002, same account as ../monitoring. Resources
   exist and the migration is applied — never recreate them.
-- `cloud/src/index.ts` imports `src/state/schema.ts` + `canonical.ts`: one
-  validation and one id function for app and server. Changing AppState
-  sanitization changes what the Worker accepts — redeploy after such changes.
+- `cloud/src/index.ts` validates and ids points with the core's wasm
+  (`sanitizePoint`, `pointId`; `npm run build` in cloud/ copies
+  `syn_wasm_bg.wasm` from src/core/pkg): one validation and one id function
+  for the apps and the server. A pin bump that changes sanitization changes
+  what the Worker accepts — `npm run deploy:cloud` after such a bump.
 - Migration SQL: inside triggers write `SELECT (CASE … END);` — without the
   parentheses wrangler's splitter takes `END;` for the end of the trigger
   ("incomplete input").
@@ -203,159 +214,95 @@ Corollaries:
 ## Module map
 
 ```
-src/dsp/generator.ts   23 formulas, per-sample, pure; block-rate LFO modulation
-                       overwrite-then-restore in fill(), each param once, all
-                       its routes added up. EVERY oscillator
-                       accumulates phase (ph1..ph4, rissPhases): the ported
-                       sin(2π·f·t) jumped phase by 2π·Δf·t on any frequency
-                       change → harsh beating after minutes (user report,
-                       PLAN.md "Bugs"). gliss: log-frequency state, restarts
-                       after 4 octaves
-src/dsp/tanpura.ts     the tanpura formula: 4 KS strings Pa–Sa–Sa–Sa, a pluck
-                       cycle, jawari = a bridge-contact pulse per string.
-                       (`bowl`, the singing bowl — 4 inharmonic modes, each a
-                       slowly beating pair — lives inline in generator.ts)
-src/dsp/shimmer.ts     OctaveShimmer: octave-up grains for the delay's feedback
-                       loop; amount 0 is a bit-exact pass-through
-src/dsp/mod.ts         LFO (pure function of absolute time; shapes append-only,
-                       6th = pink 1/f), modulatedParam: routes on one param ADD
-                       UP (octaves for exp), clamped once (PLAN.md #19).
-                       ModRoute.target = 'fx' | formula id | visual card id —
-                       the three namespaces never collide
-src/dsp/gate.ts, rng.ts  fade gate for disabled generators; mulberry32 + gaussian
-src/worklet/processors.ts  AudioWorklet processors (loaded via ?worker&url):
-                       formula-generator (seeded rng) and shimmer
-src/audio/engine.ts    AudioEngine: build(ctx) works on any BaseAudioContext;
-                       start() = live AudioContext, renderOffline() = same graph
-                       in an OfflineAudioContext with FX modulation scheduled
-                       ahead (setInterval can't drive offline time) and
-                       optional scheduled preset switches (ctx.suspend).
-                       switchTo(state) = hard switch: duck master, destroy +
-                       recreate FX nodes (no old tails), apply, fade in.
-                       Routing changes during morphs go behind a short master
-                       dip (rerouteSmoothly). applyFxParams() smooths, except
-                       right after a rebuild (freshParams)
-src/audio/features.ts  analyser → loudness, swell (vs ~4 s average), brightness,
-                       low/mid/high bands, onset envelope (adaptive: rise of 20
-                       log bands vs mean + 3·dev). Time-based smoothing (dt).
-                       OnsetDetector: envelope → discrete hits
+src/core/              the core's wasm (syn-wasm), typed for the page:
+  pkg/                 built by `npm run core` at the pinned rev, never committed
+  point.ts             sanitize (a point from outside made safe), the
+                       built-in presets, isPointId
+  session.ts           the core's syn-session on the main thread: 👍/👎/🎲/
+                       undo, morphs, the scout's bookkeeping — effects +
+                       view as typed JSON; parseLaunch, encodeToken
+  settings.ts          ⚙ Settings' data and rules (C13): the page model,
+                       the schema's formulas/cards, FX presets, route rules,
+                       samePoint
+  picture.ts           WebPicture: each frame's uniforms as JSON, seed spots,
+                       touches, the quality ladder + boot probe, the CPU
+                       picture's frames, pictureMetrics (analyze --picture)
+  audio.ts, protocol.ts  compile the module, start the worklet node;
+                       main ↔ worklet messages
+src/worklet/core.ts    the AudioWorklet hosting syn-player: renders into a
+                       view onto wasm memory (no per-quantum allocation),
+                       posts feature frames + onset hits. textPolyfill.ts:
+                       the worklet scope has no TextDecoder/TextEncoder
+src/audio/coreEngine.ts  the live sound: points in as JSON (applyState =
+                       glide, switchTo = fade out → switch → fade in);
+                       coreFrames.ts picks the frame being HEARD
+                       (getOutputTimestamp); features(), hitHeard()
 src/audio/iosUnlock.ts the iOS Ring/Silent fix (PLAN.md bugs, 2026-09-23):
                        a silent looping <audio>, started SYNCHRONOUSLY in the
                        Sound click before any await — move that call after an
-                       await and iOS goes quiet again. Ported from
-                       ../formula-synth
-src/audio/analyserSim.ts  pure AnalyserNode emulation (Blackman, smoothing, dB →
-                       byte) — runs the live feature pipeline on offline audio
-src/audio/seed.ts      repeatable renders: the reverb room and every formula's
-                       noise stream come from RENDER_SEED (PLAN.md #21)
-src/audio/filters.ts, modrouting.ts  pure pieces of the engine (tested)
-src/schema/audio.ts    formula sliders (+ `exp` flag for octave mutation),
-                       FxState, modulatable-FX allowlist/ranges/modules
-src/schema/visual.ts   cards: reaction, fieldVariation, flow, palette
-                       (Veins/Pour/Brush deliberately not ported — PLAN.md #2)
-src/sim/               SimEngine (WebGL2) + shaders + pure params; grid.ts
-                       sizes the grid to the canvas aspect (square texels) and
-                       shaders take uAspect so noise/spots stay isotropic.
-                       quality.ts: the ladder of (canvas cap, res) rungs and
-                       the boot probe that walks up it (PLAN.md #12). The
-                       engine skips a pass whose output would change nothing,
-                       reuses paramfield/velocity while their inputs are
-                       unchanged, and renders both at half the grid's side
-src/palette.ts         5 cosine palettes (order = PALETTE_NAMES)
-src/state/schema.ts    AppState v1 {audio, visual, mod, coupling}; tolerant
-                       sanitizeState + clamping stateToAppState; isModTarget
-src/state/share.ts     #s=base64url(JSON) — now only for old links and the
-                       offline Share fallback
+                       await and iOS goes quiet again
+src/scout/             pool.ts: the scout's Web Worker pool (cores − 2,
+                       staggered start, cancel); worker.ts runs the core's
+                       scoutScore on one genome
+src/sim/engine.ts      SimEngine (WebGL2): draws what WebPicture decides,
+                       with the core's shaders (C10). Skips passes that
+                       change nothing, reuses paramfield/velocity, renders
+                       both at half the grid's side
+src/sim/cpuRenderer.ts the C8 fallback (no WebGL2 float targets, or ?cpu=1)
+src/gl/                context, ping-pong targets, full-screen quad
+src/state/types.ts     AppState and friends — types only, no logic
 src/state/store.ts     localStorage with read-back: {ok} | {full|blocked}
 src/state/library.ts   "My points" = [{id, name}] (synesthesia_library_v1);
                        the point itself lives in the points database
 src/state/migrate.ts   old whole-point key → library, losing nothing
-src/ui/pointList.ts    the points panel (a <select> can't hold a per-row 🗑)
-src/ui/askDialog.ts    prompt/confirm — never the native ones (suppressible)
-src/state/canonical.ts canonicalJson (sorted keys) + presetIdOf (SHA-256 →
-                       10 base62) — shared with the Worker
-src/state/launch.ts    parseLaunch: presetId > #s= > preset > none; cleanUrl
-                       keeps settings (res/scout/api), drops the point
+src/state/userPresets.ts  the old whole-point key (read for migration)
+src/state/launch.ts    cleanUrl keeps settings (res/scout/api), drops the
+                       point; withPresetId
 src/state/cloud.ts     sharePoint / fetchPoint (injectable fetch, timeout)
 src/state/lastPoint.ts synesthesia_last_point_v1 — restored on a plain reload
-src/genome/genes.ts    GENES derived from the schemas: cont (normalized 0..1,
-                       exp → log scale) / bool / choice, gated by activeIf;
-                       MOD_TARGETS; ROUTE_SLOTS = 12
-src/genome/codec.ts    AppState ⇄ Genome (masterGain/presetName aren't genes)
-src/genome/evolve.ts   pure: mutate (sparse gaussian + momentum + one weighted
-                       structural move; never touches inactive genes), repair
-                       (1..5 formulas + explicit-coupling floor Σ ≥ 1.2),
-                       randomGenome, lerpGenome (discrete genes
-                       switch at t>0, but a closing gate stays open until t=1;
-                       gated genes with `neutral` — formula gain, route depth,
-                       FX wet mixes, flow/variation strengths — fade from/to
-                       neutral as their gate opens/closes), diffSummary
-src/genome/explorer.ts like/dislike/surprise/undo(5)/load/edit; proposeLike/
-                       proposeDislike preview without committing, like(p)/
-                       dislike(p) commit a chosen one; `version` bumps per change
-src/genome/scout.ts    background best-of-k (PLAN.md #7): renders parent + k
-                       candidates per direction via an injected render (main.ts:
-                       24 s @ 8 kHz, chosen with analyze.mjs --configs), scores
-                       with analyzeSound, adjustedScore penalizes >6 dB quieter;
-                       take() returns null for stale versions
-src/analysis/          fft.ts (radix-2), fractal.ts (spectralSlope, higuchiFD,
-                       boxCountDimension, analyzeSound, fractalScore),
-                       character.ts (dropout, swing, low-end share,
-                       harmonicity, Plomp–Levelt roughness, motion at 1/10 s),
-                       clicks.ts (median-relative HF click detector),
-                       spectrogram.ts (log-frequency waterfall for --png),
-                       picture.ts (coverage/edges/change of the sim's V)
-src/coupling.ts        pure: features × card-coupling genes → card param offsets
-                       (shift/lightAngle wrap, the rest clamp); COUPLING_LABELS
-src/visualFx.ts        pure: explicit couplings (PLAN.md #8) → DisplayFx
-                       {exposure, flash, tint[3]}; RippleSet (≤4, 1.6 s).
-                       main.ts: OnsetDetector hit → sim.inject() + ripple
-src/presets.ts         15 presets = formula-synth sound × chromaflux material,
-                       with cross-domain LFO routes and coupling
-src/ui/details.ts      read-only "what is this point" panel (+ fractality);
-                       renders into #detailsBody — the panel's own ✕ lives
-                       outside it, so a re-render can't wipe it
+src/ui/details.ts      read-only "what is this point" panel; renders into
+                       #detailsBody — the panel's own ✕ lives outside it
 src/ui/settings.ts     ⚙ Settings (PLAN.md #28): full-screen page, tabs Audio
-                       (formula-synth's panel) / Video (chromaflux's + the
-                       sound → image links). Edits a copy of the point that is
-                       main.ts's `state` while open; onSound → engine push
-                       (throttled); the frame loop exits while it is open
-                       (body[data-loop]); close → Explorer.edit, one undo step
-src/ui/settingsModel.ts  pure side of it: log/linear slider scales, FX_CARDS
-                       (ranges from the gene ranges), filter rows per type,
-                       the 5-formula cap, routes per side (12 in total),
-                       samePoint. tests/settings.test.ts: every control
-                       round-trips through the genome
+                       / Video. Edits a copy of the point that is main.ts's
+                       `state` while open; onSound → engine push (throttled);
+                       the frame loop exits while it is open (body[data-loop]);
+                       close → one undo step in the session
+src/ui/settingsModel.ts  slider scales (log/linear) + the core's data/rules
 src/ui/controls.ts, modPanel.ts, adjust.ts  the page's widgets: card, slider
                        row (−/+ auto-repeat), select row; LFO pool + routes
-src/fxPresets.ts       one-module effect presets (ported from formula-synth)
+src/ui/pointList.ts    the points panel (a <select> can't hold a per-row 🗑)
+src/ui/askDialog.ts    prompt/confirm — never the native ones (suppressible)
 src/ui/touch.ts        pure: pointer → canvas UV (Y flips) and the stamps to
-                       fill a drag between two frames. A touch runs the same
-                       inject()+ripple an onset does (PLAN.md #14) — chromaflux's
-                       Brush card itself is still not ported (PLAN.md #2)
+                       fill a drag between two frames (PLAN.md #14)
 src/ui/wakelock.ts     ScreenAwake: wake lock taken on the first gesture, re-taken
                        on visible/focus/pageshow/any touch; `sentinel.released`
                        decides, never the (late) release event
-src/main.ts            wiring only: explorer → 2 s eased genome morph →
-                       engines; shared LFO clock (audio.time when sound runs);
-                       settle → last point saved + scout scheduled; a step
-                       cleans the URL; loads use audio.switchTo; Share → short
-                       link (ClipboardItem with a promise, for Safari)
-cloud/                 Worker (src/index.ts), D1 migration, Miniflare tests
-scripts/lib.mjs        startServer (fresh, free port, killed on exit), launchBrowser (CHROMIUM_PATH, autoplay,
-                       SwiftShader), openApp (readiness), withRes
+src/bench/coreBench.ts core-bench.html: the phase 0 gate on a real device
+src/main.ts            wiring only: session effects → engine/picture/storage/
+                       scout; the rAF loop feeds WebPicture the heard
+                       features; a step cleans the URL; Share → short link
+                       (ClipboardItem with a promise, for Safari)
+cloud/                 Worker (src/index.ts, core wasm), D1 migration,
+                       Miniflare tests
+tests/                 vitest: the shell's own logic; setup.ts instantiates
+                       the core's wasm, points.ts makes points with it
+scripts/build-core.mjs clone the pinned core into .core/<rev>, wasm-pack it
+                       into src/core/pkg (+ shaders, fixtures)
+scripts/lib.mjs        startServer (fresh, free port, killed on exit),
+                       startPointsWorker, launchBrowser (CHROMIUM_PATH,
+                       autoplay, SwiftShader), openApp (readiness), withRes
 scripts/smoke.mjs      invariants only, never pixels; --mobile, --res, --screenshot
 scripts/snap.mjs       one debug screenshot
-scripts/analyze.mjs    offline render in the page (?paused=1, imports /src/*.ts
-                       from the dev server) → metrics table; --mutants,
-                       --random, --configs (Spearman of cheap windows vs the
-                       first), --wav, --png, --json, --repeat (seeds 1..N),
-                       --character, --ref (distance to a group of presets),
-                       --picture (?probe=1 → window.synesthesiaProbe reads
-                       SimEngine.readState)
+scripts/analyze.mjs    --render [--passes] (fps / ms per pass), --picture
+                       (coverage/edges/change from the core's pictureMetrics)
+scripts/core-bench.mjs the phase 0 gate headless (npm run bench:core)
 ```
 
 ## Sound analysis — what the numbers mean
+
+(The bench that prints these is synesthesia-core's `syn-bench`, and its
+`sound-check` skill holds the current table; the history below is how the
+numbers were found, on the browser's graph.)
 
 `envβ`/`cenβ`: β of 1/f^β fitted on 0.05–5 Hz fluctuations of the loudness
 (dB) / spectral-centroid (octaves) contours; contours flatter than 0.5 dB /
@@ -363,11 +310,10 @@ scripts/analyze.mjs    offline render in the page (?paused=1, imports /src/*.ts
 dimension of the loudest 20% of a 64-band log-frequency spectrogram.
 `score` = (2·pref(envβ≈1) + 2·pref(cenβ≈1) + pref(box≈1.6)) / 5.
 
-The score is one room's: the reverb impulse is seeded noise
-(`src/audio/seed.ts`), so a render repeats exactly, but another room gives
-another score. Compare points with `--repeat` when they differ by less than
-~0.1: render k uses seed k for every point, so they compare as pairs.
-`--character` says what kind of sound it is (`src/analysis/character.ts`):
+In the browser the score was one room's (a seeded convolver impulse); the
+core's FDN reverb has no seeded room, so `--repeat` varies only the noise
+generators. `--character` says what kind of sound it is
+(`syn-core/src/analysis/character.rs`):
 `drop` (median − p5 of 400 ms loudness, dB — does the band break?), `swing`
 (p95 − p5), `low` (energy share < 200 Hz), `harm` (peak energy on one
 harmonic grid), `rough` (Plomp–Levelt, level-independent), `mot1`/`mot10`
@@ -379,12 +325,10 @@ metrics more than 2 sd away.
 ## Don'ts
 
 - Don't add runtime dependencies or a UI framework.
-- Don't make presets that fail `tests/presets.test.ts` (every value must
-  survive sanitize+clamp unchanged; ≥1 visual route or coupling).
-- Don't change GENES order casually: share links store AppState (not the
-  genome), so they survive, but analysis JSON / tests assume stable ids.
-- Never write an oscillator as sin(2π·f·t) with absolute t —
-  tests/continuity.test.ts will catch it; accumulate phase.
+- Don't re-grow a model here: sound, genome, presets, sanitization, the
+  picture's decisions and the settings' data belong to the core. Change it
+  there (its own tests and skills), push, bump `synesthesiaCore.rev`.
+- Don't hand-edit src/core/pkg/ — it is rebuilt from the pin.
 - Don't let scripts or tests write to the production Worker/D1.
 - Never use `window.prompt` / `confirm` / `alert`: mobile browsers may
   suppress them, and a suppressed `prompt()` returns null, so the action

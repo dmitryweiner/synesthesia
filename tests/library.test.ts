@@ -1,6 +1,6 @@
 // "My points": the library (names + cloud ids) and the legacy store it
 // replaces (whole points in localStorage, PLAN.md decision 11).
-import { defaultAppState } from '../src/state/schema';
+import { defaultPoint as defaultAppState } from './points';
 import { writeJson, readJson, removeKey } from '../src/state/store';
 import {
   LIBRARY_KEY, loadLibrary, saveLibrary, upsertPoint, removePoint,

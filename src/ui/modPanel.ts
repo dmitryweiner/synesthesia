@@ -4,19 +4,17 @@
 // of its own side. Unlike the siblings the DOM is not the source of truth —
 // the widgets write straight into the point's ModState and sync() redraws
 // them, since both tabs edit the same LFOs.
-import type { AppState } from '../state/schema';
-import { LFO_COUNT } from '../state/schema';
-import type { ModRoute } from '../dsp/mod';
-import { isLfoShape, LFO_SHAPE_LIST } from '../dsp/mod';
+import type { AppState } from '../state/types';
+import type { ModRoute } from '../state/types';
+import type { LfoShape } from '../state/types';
 import { make } from './dom';
 import { card, fillSelect, selectRow, sliderRow } from './controls';
 import type { ChoiceOption } from './controls';
 import type { Domain } from './settingsModel';
 import {
-  FX_TARGET, LFO_PHASE_SCALE, LFO_RATE_SCALE, LFO_SHAPE_LABELS, ROUTE_DEPTH_SCALE,
-  canAddRoute, formatValue, isTargetOn, newRoute, routeDomain, targetExp, targetGroups,
+  FX_TARGET, canAddRoute, coreSchema, formatValue, isTargetOn, lfoPhaseScale, lfoRateScale, lfoShapeLabels,
+  newRoute, routeDepthScale, routeDomain, targetExp, targetGroups,
 } from './settingsModel';
-import { ROUTE_SLOTS } from '../genome/genes';
 
 export interface ModPanelOptions {
   domain: Domain;
@@ -27,7 +25,14 @@ export interface ModPanelOptions {
   onChange(kind: 'lfo' | 'route'): void;
 }
 
-const SHAPE_OPTIONS: ChoiceOption[] = LFO_SHAPE_LIST.map((s) => ({ value: s, label: LFO_SHAPE_LABELS[s] }));
+function isLfoShape(v: string): v is LfoShape {
+  return coreSchema().lfoShapes.includes(v);
+}
+
+function shapeOptions(): ChoiceOption[] {
+  const labels = lfoShapeLabels();
+  return coreSchema().lfoShapes.map((s) => ({ value: s, label: labels[s] ?? s }));
+}
 
 export class ModPanel {
   readonly root: HTMLElement;
@@ -46,13 +51,13 @@ export class ModPanel {
       tag: 'shared by sound and picture',
       desc: 'Slow oscillators. One LFO can move a sound parameter and a picture parameter at once — that is how they breathe together.',
     });
-    for (let i = 0; i < LFO_COUNT; i++) this.buildLfo(lfoCard.body, i);
+    for (let i = 0; i < coreSchema().lfoCount; i++) this.buildLfo(lfoCard.body, i);
     this.root.appendChild(lfoCard.root);
 
     const routesCard = card({
       id: `${opts.id}_routes`,
       title: opts.domain === 'sound' ? 'Routes → sound' : 'Routes → picture',
-      tag: `${ROUTE_SLOTS} at most, both sides together`,
+      tag: `${coreSchema().routeSlots} at most, both sides together`,
       desc: opts.domain === 'sound'
         ? 'Which LFO moves which sound parameter, and how far (± a share of its range; “oct” moves it in octaves).'
         : 'Which LFO moves which picture parameter, and how far (± a share of its range).',
@@ -82,7 +87,7 @@ export class ModPanel {
     mine.forEach((r, i) => this.routesHost.appendChild(this.routeRow(r, i)));
     const full = !canAddRoute(s);
     this.addBtn.disabled = full;
-    this.addBtn.title = full ? `${ROUTE_SLOTS} routes at most — sound and picture together. Remove one first.` : '';
+    this.addBtn.title = full ? `${coreSchema().routeSlots} routes at most — sound and picture together. Remove one first.` : '';
   }
 
   private buildLfo(host: HTMLElement, i: number): void {
@@ -92,7 +97,7 @@ export class ModPanel {
     const shape = selectRow({
       id: `${this.opts.id}_lfo${i}_shape`,
       label: 'Shape',
-      options: SHAPE_OPTIONS,
+      options: shapeOptions(),
       get: () => lfo().shape,
       set: (v) => {
         if (isLfoShape(v)) lfo().shape = v;
@@ -102,7 +107,7 @@ export class ModPanel {
     const rate = sliderRow({
       id: `${this.opts.id}_lfo${i}_rate`,
       label: 'Rate (cycle)',
-      scale: LFO_RATE_SCALE,
+      scale: lfoRateScale(),
       get: () => lfo().rate,
       set: (v) => { lfo().rate = v; this.opts.onChange('lfo'); },
       // at 0.003–2 Hz one full cycle (5.5 min … 0.5 s) says more than the rate
@@ -111,7 +116,7 @@ export class ModPanel {
     const phase = sliderRow({
       id: `${this.opts.id}_lfo${i}_phase`,
       label: 'Phase',
-      scale: LFO_PHASE_SCALE,
+      scale: lfoPhaseScale(),
       get: () => lfo().phase,
       set: (v) => { lfo().phase = v; this.opts.onChange('lfo'); },
     });
@@ -144,7 +149,7 @@ export class ModPanel {
     const src = make('select');
     src.id = `${id}_src`;
     src.setAttribute('aria-label', 'LFO');
-    fillSelect(src, Array.from({ length: LFO_COUNT }, (_, i) => ({ value: String(i), label: `LFO ${i + 1}` })));
+    fillSelect(src, Array.from({ length: coreSchema().lfoCount }, (_, i) => ({ value: String(i), label: `LFO ${i + 1}` })));
     src.value = String(route.src);
     const target = make('select');
     target.id = `${id}_target`;
@@ -165,7 +170,7 @@ export class ModPanel {
     const depth = sliderRow({
       id: `${id}_depth`,
       label: 'Depth',
-      scale: ROUTE_DEPTH_SCALE,
+      scale: routeDepthScale(),
       get: () => route.depth,
       set: (v) => { route.depth = v; this.opts.onChange('route'); },
       format: (v) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}`,

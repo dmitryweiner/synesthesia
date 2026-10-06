@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0d1117" />
+    <title>Synesthesia — core bench</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #0d1117; color: #e6edf3; font: 14px/1.4 system-ui, sans-serif; }
+      canvas { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; }
+      #panel { position: relative; z-index: 1; margin: 12px; padding: 12px; max-width: 760px; background: rgba(13, 17, 23, 0.86); border-radius: 8px; }
+      button { font: inherit; padding: 8px 14px; margin: 0 8px 8px 0; }
+      table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+      td, th { padding: 2px 6px; text-align: right; border-bottom: 1px solid #30363d; }
+      td:first-child, th:first-child { text-align: left; }
+      #verdict.pass { color: #3fb950; } #verdict.fail { color: #f85149; }
+      pre { white-space: pre-wrap; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <canvas id="view"></canvas>
+    <div id="panel">
+      <h3 style="margin: 0 0 8px">Core bench — syn-player in an AudioWorklet</h3>
+      <p style="margin: 0 0 8px">Every preset is timed on the audio thread, then the heaviest one plays
+        live: 20 s without the picture, a minute while it draws, 30 s at 3× the work while it draws, then one more timing. Keep the screen on. Query: <code>?secs=60&amp;idle=20&amp;batch=5&amp;rung=2&amp;draw=1&amp;stress=3&amp;transport=module</code></p>
+      <button id="start">▶ Start</button><button id="copy" disabled>Copy result</button>
+      <div id="status">idle</div>
+      <h4 id="verdict"></h4>
+      <table id="table"></table>
+      <pre id="env"></pre>
+    </div>
+    <script type="module" src="./src/bench/coreBench.ts"></script>
+  </body>
+</html>

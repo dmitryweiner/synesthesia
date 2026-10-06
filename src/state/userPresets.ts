@@ -2,7 +2,7 @@
 // localStorage. Kept only to migrate them into the library (state/library.ts)
 // — they are uploaded on boot and this key is then dropped, which also frees
 // ~4.4 KB per point of the origin's shared quota.
-import type { AppState } from './schema';
+import type { AppState } from './types';
 import { readJson, removeKey, writeJson } from './store';
 import type { SaveResult } from './store';
 

@@ -3,11 +3,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "esbuild src/index.ts --bundle --format=esm --platform=browser --outfile=dist/index.js",
+    "build": "npm run wasm && esbuild src/index.ts --bundle --format=esm --platform=browser --external:./syn_wasm_bg.wasm --outfile=dist/index.js",
     "check": "tsc --noEmit",
     "test": "npm run build && node --test test/*.test.mjs",
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "wasm": "node -e \"const fs=require('fs');fs.mkdirSync('dist',{recursive:true});for(const t of ['src','dist'])fs.copyFileSync('../src/core/pkg/syn_wasm_bg.wasm',t+'/syn_wasm_bg.wasm')\""
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260911.1",

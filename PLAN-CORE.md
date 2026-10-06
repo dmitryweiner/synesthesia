@@ -1,6 +1,8 @@
 # Moving the web app onto the shared core — plan & decisions
 
-*Status: decisions agreed with the user on 2026-10-05; no phase started.*
+*Status: decisions agreed with the user on 2026-10-05; phase 0 built on
+branch `core` (2026-10-05); phase 0 done (the Android gate passed after C12, cheaper generators in
+the core); phases 0–9 done: the swap merged into `main` on 2026-10-06; phase 10 (`preset_name`) is left.*
 
 The web app was the first home of Synesthesia and is still the
 specification: [synesthesia-core](../synesthesia-core/) dumps its presets,
@@ -132,6 +134,43 @@ C11. **`presetName` → `preset_name` is not part of this migration.** The
     apps (old `#s=` tokens and D1 points keep being read; the id question is
     decided then).
 
+C12. **The core's generators are made cheaper; their golden takes may move
+    within −100 dB** (agreed 2026-10-05, after phase 0's gate). On an
+    Android phone (Chrome 154, 8 cores) the heaviest preset took 13 % of the
+    budget as a batch but ~50 % live (the audio thread runs on a slow core;
+    drawing does not change it), and at 3× the work the thread stalled (22
+    gaps > 50 ms, up to 176 ms) — ~2× of headroom instead of the gate's 3×.
+    A native profile of the heaviest presets: generators 74 % (Shepard's
+    per-octave `exp2`/`log2`/`exp` and Additive's 2·N `sin` per sample),
+    the FX chain 16 %, the analyser's FFT 8 %. So the generators are
+    rewritten for speed (recurrences, analytic logs, no per-octave
+    transcendental where an identity gives it), and the golden comparison
+    for a rewritten generator is "worst difference ≤ 1e-5" (−100 dBFS)
+    instead of 1e-6. Every other generator stays at 1e-6; the takes stay
+    frozen. The gate is re-measured on the phone afterwards.
+    - **Done (core `2c60f92`):** the looser tolerance was not needed — the
+      takes still match to 1.6e-16. Additive by rotating unit vectors (4
+      transcendentals per sample instead of 2·N), Shepard by an analytic
+      log2 and a recurrent envelope, `hypot` → `sqrt(re²+im²)` in the
+      analyser (wasm has no fma; libm's `hypot` emulates one — 20 % of the
+      wasm render, invisible in the native profile), and `phase` wrapped at
+      1e5 instead of 1e9 (musl's `sin` goes multi-precision past ~1.6e6:
+      the wasm render grew 15 % over 20 minutes; now flat for an hour).
+      Wasm in node, % of a 48 kHz budget: Fractal garden 7.0 → 3.4, Loom &
+      copper 7.1 → 3.0, Overtone steppe 6.1 → 2.2; the heaviest is now
+      Tanpura halo, 3.7 → 3.3. Left: FX chain 19 %, `sin` 22 %, FFT 11 %.
+
+C13. **⚙ Settings keeps the web app's look; its data and rules are the
+    core's** (the user's choice, 2026-10-06, over the generated gene-by-gene
+    page Android has). The page still has the effect-preset menu, a filter
+    that shows only the rows its type uses, the five-formula cap and routes
+    listed per side with "add"; what it shows (titles, slider names and
+    steps, choices, filter rows per type, couplings, scales, route targets)
+    is `assets/settings-page.json` in the core, and its rules (formula cap,
+    target on, new route, route slots, modulated keys, same point) are
+    `syn_core::settings_page`, with the round-trip guarantee as a core test.
+    The web keeps only presentation: slider math and number formatting.
+
 Unchanged by all of the above: the `AppState` v1 shape and the gene order;
 localStorage keys and formats (`synesthesia_library_v1`, the last point);
 `#s=` and `?presetId=` links; the points Worker's API and D1.
@@ -167,16 +206,16 @@ table updated.
 
 | phase | | state |
 |---|---|---|
-| 0 | `syn-wasm` scaffold + the performance gate | — |
-| 1 | Freeze the TS behaviour into core fixtures; core catches up | — |
-| 2 | The core becomes the specification | — |
-| 3 | Sound: the core engine in the AudioWorklet | — |
-| 4 | Session and scout | — |
-| 5 | Picture | — |
-| 6 | Settings, details, points, links | — |
-| 7 | Points Worker on wasm | — |
-| 8 | Tooling, CI, docs | — |
-| 9 | Listening pass and the swap | — |
+| 0 | `syn-wasm` scaffold + the performance gate | **done** 2026-10-05: Android passes after C12 (heaviest 6.7 % batch, 3× clean); iPhone not measured |
+| 1 | Freeze the TS behaviour into core fixtures; core catches up | done |
+| 2 | The core becomes the specification | done |
+| 3 | Sound: the core engine in the AudioWorklet | done (listened to in phase 9) |
+| 4 | Session and scout | done: the scout renders 24 s @ 11 kHz |
+| 5 | Picture | done |
+| 6 | Settings, details, points, links | done |
+| 7 | Points Worker on wasm | done, deployed at the swap |
+| 8 | Tooling, CI, docs | done |
+| 9 | Listening pass and the swap | **done** 2026-10-06 |
 | 10 | After: `preset_name` (C11) | — |
 
 ### 0. Scaffold and the performance gate
@@ -208,6 +247,71 @@ table updated.
 - Bundle size of `syn-wasm` (gzip) written down; it matters for the first
   load on a phone and for the Worker (phase 7).
 
+**Done (2026-10-05).** synesthesia-core `dc1457f` adds `syn-wasm`
+(`AudioCore`: the player for one worklet, presets, the version); this
+repository pins it in `package.json` (`synesthesiaCore.rev`) and builds it
+with `npm run core` (`scripts/build-core.mjs`) into `src/core/pkg/`,
+gitignored. The worklet is `src/worklet/core.ts`, its main-thread half
+`src/core/audio.ts`, the protocol `src/core/protocol.ts`.
+
+How the mechanics came out (`tests/coreWorklet.test.ts` pins each):
+- **The module** is compiled on the main thread and handed over in
+  `processorOptions`; where a browser refuses to clone a `Module` (a
+  `DataCloneError` from the node's constructor), the bytes go instead and
+  the worklet compiles them (`initSync` does). Both paths measured in
+  Chromium; Safari's is what the iPhone run will say (the page prints which
+  one it took).
+- **`TextDecoder`**: wasm-bindgen's glue constructs one when it is
+  evaluated, so a scope without it fails at import. Decided: a ~30-line
+  UTF-8 decoder (`src/worklet/textPolyfill.ts`) installed only where the
+  global is missing, imported before the glue; `AudioCore` itself speaks
+  numbers and byte arrays only, so the decoder is reached only by a panic
+  message. No `TextEncoder` is needed (points go in as bytes, encoded on the
+  main thread).
+- **No allocation per quantum**: `render(n)` returns an offset into the
+  module's memory and the worklet keeps one `Float32Array` view onto it,
+  remade only when the memory grew — which a new point's parse can do once,
+  a quantum never does (the test runs 5 000 quanta and counts views).
+- **Load is timed with `Date.now()`** inside the worklet: Chromium's
+  worklet scope has neither `performance` nor `TextDecoder` (probed). The
+  first bench assumed its 1 ms steps fall at random phases of a 2.7 ms
+  quantum, so a live sum would be unbiased. **It is not reliable**: on the
+  Mac the same preset reads 6 % as a batch and while drawing, but 22–25 %
+  live with nothing drawn (an idle CPU wakes the audio thread on a slow
+  core and/or in step with the millisecond); the Android phone read 13 % as
+  a batch and 44 % live while drawing, with no underrun. So live
+  percentages are reported, not gated. What the gate reads instead:
+  - batches (hundreds of ms each, immune to the step), idle **and** while
+    the picture draws;
+  - a **stress phase**: ballast players of the heaviest preset render
+    beside the live one (`ballast` command), 3× the work ≈ 35 % of the
+    budget, for 30 s while drawing, and the underruns are counted
+    (Chrome's `AudioContext.playbackStats`). Checked that it can fail: on
+    the Mac 12× gave 5 underruns, 30× 1 794 and kept up only 52 %.
+    Safari has no underrun counter; there only a sustained overload shows
+    (`keptUp` < 99 %), and gaps > 50 ms between quanta.
+- **Size**: `syn_wasm_bg.wasm` 650 KB, **187 KB gzip** (the whole model is
+  linked: presets, schema, genome). The worklet bundle is 5 KB.
+
+The gate's bench is `core-bench.html` (`npm run bench:core` headless;
+`npm run bench:serve` serves it over self-signed HTTPS to a phone on the
+LAN). Results, worklet thread, 48 kHz:
+
+| device | browser | heaviest (batch, idle / drawing) | live idle / drawing | underruns live / at 3× | verdict |
+|---|---|---|---|---|---|
+| MacBook (M-series, 10 cores) | headless Chromium, SwiftShader picture 30 fps at rung 2 | Fractal garden 6.3 % / 6.3 % (16× realtime); lightest 1.1 % | 22.6 % / 6.2 % | 0 / 0 | pass |
+| Android 10, 8 cores (first bench, no stress phase) | Chrome 154, picture 60 fps at rung 2 (577×1080, grid 205×384) | Loom & copper 13.0 % (7.7×); lightest 2.1 % | — / 43.7 % | 0 / — | 44 % > 35 % by the old reading; rerun |
+| Android 10, 8 cores | Chrome 154, picture 60 fps at rung 2 | Fractal garden 12.9 % / 13.1 % (7.8×); lightest 2.1 % | 51.3 % / 48.3 % | 0 / 0 by Chrome's counter, but 22 gaps > 50 ms (max 176 ms) at 3× | **fail** → C12 |
+| MacBook, after C12 | headless Chromium | Tanpura halo 3.0 % / 3.1 % | 9.8 % / 1.9 % | 0 / 0 | pass |
+| Android 10, 8 cores, after C12 | Chrome 154, picture 60 fps at rung 2 | Tanpura halo 6.7 % / 7.6 % (15×); Fractal garden 5.4 %, lightest 2.0 % | 29.2 % / 31.3 % | 0 / 0, no gap > 50 ms at 3× (max 9 ms), kept up 100 % | **pass** |
+| iPhone | Safari | | | | not available to the user |
+
+`-C target-feature=+simd128` was tried: the same within ±3 % (node, all 15
+presets, twice) — the DSP is per-sample and scalar, there is nothing for
+the auto-vectorizer. Not a lever.
+
+The production bundle (`vite build`) measures the same (6.4 % / 6.2 %).
+
 ### 1. Freeze the TS behaviour; the core catches up
 
 Everything the TypeScript knows that the core does not yet pin, captured
@@ -232,6 +336,60 @@ Everything the TypeScript knows that the core does not yet pin, captured
 - **Shaders** moved to `synesthesia-core/shaders/` (C10), with a check that
   they are identical to this repository's until the swap.
 
+**Done (2026-10-05, core `f372544`…`2ed3c01`).** What was frozen, and what
+it turned up:
+- **Points** (`fixtures/points.json`, `scripts/dump-points.mjs`):
+  `syn_core::point::{sanitize, canonical_json, point_id}` reproduce the
+  TypeScript on 283 inputs — presets, the default, 40 random genomes, 160
+  mutated points (wrong types, out-of-range and huge numbers, deleted and
+  unknown keys, replaced branches), 30 broken LFO/route sets, 25 old shapes
+  (no shimmer, no explicit couplings, no `mod`, `preset_name`, a name that
+  needs escaping), 12 non-points — **byte for byte, ids included**. Two
+  things had to be right for that: numbers written as `JSON.stringify`
+  writes them (`55`, not serde's `55.0`; `1e+21`; `-0` → `0`), and
+  serde_json's `float_roundtrip` (its default float parse was off by an
+  ulp on a few % of the values).
+  - **The production D1** (read-only export, 2026-10-05, 20 points, all
+    the user's): each sanitizes in the core exactly as in the TypeScript,
+    and every stored value survives. 17 of them gain fields the schema grew
+    after they were stored (`tanpura`, `bowl`, `delayShimmer`), so
+    re-sanitized they canonicalize to a new id — in the TypeScript too.
+    Their links keep working: the Worker serves a stored body by its id
+    and never recomputes it; only a re-share gets a new id. To refresh:
+    `wrangler d1 execute … --json --command "SELECT id, body FROM points"`
+    (Node ≥ 22, logged in), then `node scripts/dump-points.mjs --extra
+    <that file>` in the core, before the TypeScript is deleted.
+- **What changed** (`fixtures/changes.json`): 120 genome pairs → the same
+  genes, directions and status line (`syn_session::describe_change`).
+- **FX presets** → `assets/fx-presets.json` + `syn_core::fx_presets`.
+- **Onsets** (`syn-core/tests/onsets.rs`): the web test's pipeline in the
+  core gives the TypeScript's own hit counts on eight presets, its
+  thresholds hold, and the engine through its FX still fires on bells and
+  not on drones. Found and fixed: the core's analyser waited for a full
+  2048-sample window before its first frame, where an AnalyserNode (and
+  the TS emulation) start from zeros — that shifted the detector's warm-up
+  and gave Aurora two extra hits. **Open for phase 9:** through its own
+  FX the engine fires more than the browser's graph did on the same 16 s
+  (Bell spots 11 vs 7, Cave coral 33 vs 12, Aurora 6 vs 1; dry, the two
+  agree) — the picture will react more often; look at it in the
+  listening pass.
+- **Shaders** → `synesthesia-core/shaders/`, shipped inside the package by
+  `build-core.mjs`; `tests/coreShaders.test.ts` keeps `src/sim/shaders/`
+  identical until the swap.
+- **Analysis** (`fixtures/analysis.json`, `scripts/dump-analysis.mjs`):
+  character, clicks and the log spectrogram ported and checked on every
+  preset's dry mix (character to 1e-6, clicks exactly, the spectrogram to
+  1e-3 dB above −90 dB). Chaotic formulas are left out of that mix: the
+  logistic map turns a last-bit LFO difference into a different signal
+  after ~17 s (0.24 apart) — known, and watched by golden/'s
+  `chaotic_formulas_stay_in_family`.
+- **`picture.ts` moves** (the open question): it is pure on the V field, so
+  `syn_core::analysis::picture` has it; the web's `--picture` keeps reading
+  its GPU field and will call the core's metric (phase 8).
+- Not ported yet (C6, phase 8 with the bench binary): the onset and
+  preset-switch benches, `--configs`, `--repeat`, `--ref`, `--wav`, PNG
+  output.
+
 ### 2. The core becomes the specification (C2)
 
 - `assets/presets.json`, `schema.json`, `genomes.json` become hand-edited
@@ -243,6 +401,17 @@ Everything the TypeScript knows that the core does not yet pin, captured
   specification" → the core is), and synesthesia-android's PLAN.md
   "Keeping up with the web app" (the direction reverses).
 - Android: `sync-shaders.sh` reads from the core.
+
+**Done (2026-10-05, core `28435d8`).** `assets/` is the source and
+`syn-core/tests/presets.rs` carries the web app's preset rules (sanitize
+round trip, 1..max formulas, every card, routes in the genome's slots, a
+sound→image link, explicit couplings ≥ the floor, genome round trip,
+audible and bounded). `dump-presets.mjs` and `dump-golden.mjs` are gone;
+the codec's check moved to `fixtures/genomes.json` (frozen states with
+their TypeScript genomes), so editing a preset no longer breaks it. The
+core's README and AGENTS say it is the specification. synesthesia-android
+`sync-shaders.sh` reads the core's `shaders/` and its PLAN.md says the
+direction reversed — pushed (`8eb503b`).
 
 ### 3. Sound (branch `core`)
 
@@ -259,6 +428,24 @@ Everything the TypeScript knows that the core does not yet pin, captured
 - Checks: the smoke's sound assertions; preset switches without clicks
   (the core's `--switch` bench); the continuity test lives in the core.
 
+**Done (2026-10-05, core `54ce26f`).** `src/audio/coreEngine.ts` is the
+live sound: the worklet posts a feature frame every 8 quanta (~21 ms), and
+`src/audio/coreFrames.ts` (pure, tested) gives `main.ts` the frame being
+*heard* (`getOutputTimestamp`, else `currentTime − outputLatency`) and each
+onset hit once, when heard. The LFO clock stays `currentTime − start`, the
+engine's own clock. Volume is the point's master gain (the engine smooths
+it). A switch is fade out → 100 ms → `switch_to` → fade in, the morph a
+`setPoint` every 50 ms. The old `AudioEngine` stays only for the scout's
+offline render and `analyze.mjs` until phases 4 and 8 — no live dual path.
+Checks:
+- the smoke now asserts that the sound reaches the picture (an onset hit
+  from Bell spots within 15 s; the exposure follows the swell) — and fails
+  when the frames are cut;
+- `syn-player/tests/switch.rs`: no click at a switch between any two
+  neighbouring presets, by the click detector's own HF measure against the
+  same points playing on (and it fails without the fade-out);
+- `syn-core/tests/continuity.rs`: the web app's continuity tests.
+
 ### 4. Session and scout
 
 - `main.ts` drives `syn-session`: a press, a load, settings open/close and
@@ -272,6 +459,52 @@ Everything the TypeScript knows that the core does not yet pin, captured
   (underruns while it runs) on the phone from phase 0. Choose the render
   length/rate here and write the number into this file.
 
+**Built (2026-10-05, core `326a96c`).** `main.ts` drives `syn-session`
+through `src/core/session.ts` (syn-wasm `WebSession`; every call returns
+its effects as JSON): the presses, a load, ⚙ Settings open/close, the
+volume and a 25 ms clock go in; `applyEffects()` gives them their meaning
+(the sound, the picture, `saveLastPoint`, the status line, the scout). The
+picture reads the session's live point while it morphs, with or without
+sound. The web's own UI stays the web's: status labels of a load
+("loaded", "restored", "opened link"), the points list, URL cleaning. The
+scout's own status line ("scouted 3 + 3…") is left out, as before: it would
+overwrite what the user just did.
+- `src/scout/pool.ts` + `worker.ts`: `max(1, cores − 2)` Web Workers, each
+  its own wasm instance; a job's units (the parent, then likes and
+  dislikes interleaved) go one per worker; `scout::score` /
+  `scout::assemble` in the core are those units (the core's `scout::run`
+  read `Instant::now()`, which panics in wasm). A press cancels the job
+  in flight: it settles at once as version −1, which the session drops.
+- Found on the way: once the glue carries the session (strings), it builds
+  a `TextEncoder` as it loads, and Chromium's worklet scope has none — the
+  processor silently failed to register. The worklet polyfill has a
+  minimal encoder now, and `tests/coreWorklet.test.ts` stubs both away.
+- Behaviour that is the core's now, not the TS's: an undo takes a step
+  back off the count (the TS counted it as a step); 🎲 names the point
+  "near <preset>" and starts the count again.
+- The scout's cost (`core-bench.html`'s scout phase, 3 jobs each, the
+  heaviest preset playing and the picture drawing): MacBook, 8 workers —
+  24 s @ 8 kHz 0.26 s a job, 30 s @ 22 kHz 0.60 s, no underrun. **The
+  phone decides** whether the reference render (30 s @ 22 kHz, ρ = 1 by
+  definition, against 0.73 for the surrogate) is affordable; until then
+  the core's default (24 s @ 8 kHz) plays, and `?scout=30@22050` tries the
+  other.
+- **Decided (2026-10-06), by two measurements.** The Android phone (6
+  workers, Tanpura halo playing, the picture at 60 fps): a job of seven
+  in 1.6 s at 24 s @ 8 kHz, 4.1 s at 30 s @ 22 kHz, no underrun either
+  way. And ρ on the core's chain (105 genomes: the presets and three 👍 +
+  three 👎 proposals of each, against 30 s @ 22 kHz): 24 s @ 8 kHz **0.60**
+  (the browser chain's 0.73 does not carry over), 24 s @ 11 kHz **0.79**,
+  30 s @ 16 kHz 0.80, 16 s @ 11 kHz 0.58. So **24 s @ 11 kHz**: ρ 0.79 for
+  ~17 % more than 8 kHz, ~2 s a job on the phone — set as the core's
+  `ScoutConfig` default (core `2b3274e`), which Android gets too when it
+  bumps its pin. `?scout=S@R` still overrides it.
+- The first scout job after a page load cost the sound one 51 ms gap on
+  the phone (no underrun counted; a second run in the same tab had none):
+  six workers instantiating at once. The pool now brings them up one at a
+  time, each after the last says it is ready, and starts work with the
+  first. To re-measure cold: reload the bench page, then Start.
+
 ### 5. Picture
 
 - `src/sim/engine.ts` keeps WebGL2 and the passes; the per-frame inputs
@@ -283,6 +516,31 @@ Everything the TypeScript knows that the core does not yet pin, captured
 - Measure: `--render` fps before/after on this machine, interleaved
   (AGENTS.md), must not regress.
 
+**Done (2026-10-06, core `3808e74`).** `syn-wasm` `WebPicture` is
+syn-ffi's `PictureDriver` for the page (`src/core/picture.ts`): every
+frame is one JSON (≈0.9 KB) named after the uniforms it fills; the
+driver decides the injects (hits heard, finger stamps), the ripples, the
+LFO clock (the heard frame's time while sound plays), the noise's drift,
+the seed spots, and the quality rung (`sim::quality`'s ladder and boot
+probe). `SimEngine` now only draws: `step(frame)`, `render(frame)`,
+`reseed(spots)`; its shaders come from the package (C10), so
+`src/sim/shaders/` and the identity test are gone.
+- **CPU fallback (C8):** `src/sim/cpuRenderer.ts` — the core's CPU
+  `Picture` draws the same frame into a 2D canvas, 160 px on the long
+  side, scaled up by CSS; taken when `SimEngine` cannot be made (no WebGL2
+  or no float targets) or with `?cpu=1`. The smoke checks it draws.
+- **The same picture both ways:** the smoke seeds one field, draws three
+  frames on the GPU and on the CPU (64 px, grid 128²) and compares the
+  pixels, as synesthesia-android's PictureTest does: **1.34 / 255 apart,
+  against 15.4 for a field from another seed** (bound: < 12 and the
+  control ≥ 4× further).
+- **Cost:** the driver is 25 µs a frame on the Mac (wasm, JSON included),
+  `setPoint` 74 µs per change of point. `--render` fps, base vs new
+  snapshots, interleaved, three rounds at 1280 px: grid 1024 7.63 → 7.41,
+  grid 384 17.78 → 17.35 (rounds scatter ±10 %; an earlier pair at 512
+  read 13.8 / 9.9 → 17.5 / 15.4) — no regression to measure.
+  `analyze.mjs --render --passes` builds its frame with the driver too.
+
 ### 6. Settings, details, points, links
 
 - ⚙ Settings renders the core's settings model; `tests/settings.test.ts`'s
@@ -291,12 +549,53 @@ Everything the TypeScript knows that the core does not yet pin, captured
 - `parse_launch` from the core; `presetId` fetch, URL cleaning, library,
   last point, migration stay here unchanged.
 
+**Done (2026-10-06, core `130e598`).**
+- ⚙ Settings as C13 says: `src/core/settings.ts` reads the core's page
+  model, schema and effect presets and calls its rules;
+  `src/ui/settingsModel.ts` keeps the slider math; the model tests moved
+  to the core's `tests/settings_page.rs` (17, the round trip included).
+  Found there: comparing points by their genomes made the round-trip check
+  a tautology (`encode(decode(encode(p))) = encode(p)` always) — the core's
+  `same_point` compares values to nine digits, as the TypeScript did.
+- Links: `parse_launch` and `#s=` tokens from the core. Its token decoding
+  was strict serde, so an old link with a partial point did not open; it
+  sanitizes now (`point::sanitize`), as the web app did — Android gains
+  that too.
+- Details, the status line and the scout's numbers come from the session
+  (phase 4); the points list, the library, `presetId` fetching and URL
+  cleaning stay the web's.
+- `build-core.mjs` bug found: pinned revs share one cargo target dir, and a
+  checkout older than the last build was taken as built — it handed back
+  another rev's package. It touches the checkout's sources before a build.
+- **Open (the machine, not the code):** on 2026-10-06 this Mac's audio
+  device stalled — a fresh `AudioContext` in headless Chromium is
+  `running` but advances 5 ms in 1.5 s — so the smoke's two "sound reaches
+  the picture" checks fail here (no frames without a clock); every other
+  check passes, and the same checks passed on this code's parents. Re-run
+  them once the audio device runs again.
+
 ### 7. Points Worker on wasm (C5)
 
 - `cloud/` loads `syn-wasm` (a Worker size limit check: if the full package
   is too large, a `state`-only build feature of `syn-wasm`).
 - Miniflare tests: the fixture of real points gets the same ids as before.
 - Deploy only after the swap (phase 9), by the user's go.
+
+**Done (2026-10-06, core `9861b93`).** `cloud/src/index.ts` validates with
+the core: `sanitizePoint` (the canonical JSON of what a body sanitizes to)
+and `pointId`, from syn-wasm; `cloud/` no longer imports `src/state/*`. The
+`.wasm` is imported as a module (wrangler's CompiledWasm rule; the tests'
+Miniflare gets it in its module list; `npm run wasm` copies it from the
+pinned package, never committed). The Miniflare test posts **every case of
+the core's `fixtures/points.json`** through the Worker — presets, random
+genomes, mutated and broken JSON, old shapes, the 20 production points —
+and each gets the id the TypeScript gave it (non-points: 422). Size: the
+bundle 31 KB + the wasm 1.34 MB, 384 KB gzipped together — far under the
+3 MB limit, so no `state`-only build. `wrangler deploy --dry-run` bundles
+it. The real deploy waits for the swap (phase 9), by the user's go.
+- Noted for phase 8: the wasm has grown from 650 KB to 1.34 MB (≈370 KB
+  gzipped) as the session, the picture and the settings joined it; that
+  is also the page's first load.
 
 ### 8. Tooling, CI, docs
 
@@ -307,6 +606,34 @@ Everything the TypeScript knows that the core does not yet pin, captured
 - AGENTS.md module map, README, PLAN.md "Architecture", the `verify` skill
   rewritten; `sound-check` and `new-preset` move to the core.
 
+**Done (2026-10-06, core `25b8eb4`)**, but for what only the swap can do:
+- `syn-bench` (core): the sound modes of `analyze.mjs` — fractality,
+  `--repeat`, `--mutants`/`--random`/`--token`/`--points` (drafts),
+  `--character`/`--ref`, `--wav`, `--png` (log waterfall + loudness),
+  `--onsets`, `--switch`, `--configs`. Points render in parallel. The FDN
+  reverb has no seeded room, so `--repeat` varies only the noise seeds.
+  The first waterfall of Bell spots showed what the onset numbers meant:
+  every strike is followed by the delay's echoes, which the engine counts.
+- `analyze.mjs` keeps `--render`, `--render --passes`, `--picture`; the
+  sound flags print where they went.
+- CI: `.github/workflows/pages.yml` — the pinned core built from its
+  repository (Rust, wasm32, wasm-pack), `npm run check`, the Worker's
+  checks, the smoke (blocking: the first hosted run, 2026-10-06, passed
+  all of it, the sound → picture steps included), the build into `dist/`,
+  and on main the Pages deploy. The user switched Pages to "GitHub
+  Actions" on 2026-10-06. `docs/`
+  left git.
+- Skills: `sound-check` and `new-preset` live in the core (syn-bench,
+  `assets/presets.json`, drafts as `--points`), `bands.mjs` with them;
+  `verify` here is rewritten for the core branch.
+- **Preview before the swap (the open question):** `npm run bench:serve`
+  — the branch served over self-signed HTTPS on the LAN — is what the user
+  has used for every phone check of phases 0–5; it stays the way. No
+  second host.
+- Left for the swap: the AGENTS.md module map and README/PLAN.md
+  "Architecture" describe the TypeScript model until it is deleted; they
+  are rewritten in the same merge.
+
 ### 9. Listening pass and the swap
 
 - The user listens to all 15 presets on the branch (desktop, Android
@@ -316,15 +643,24 @@ Everything the TypeScript knows that the core does not yet pin, captured
   Android and the console.
 - Then: merge, delete the TS model, deploy the Worker, bump nothing else.
 
+**Done (2026-10-06, core `fa7e8a2`).** The user listened on the branch:
+"works great, I can't hear a difference in the presets" — no preset
+retuned. Then, in the merge: the TypeScript model left the repo
+(src/analysis, dsp, genome, schema, the old AudioEngine and its pieces,
+coupling, visualFx, palette, presets, fxPresets, sim/grid·params·quality,
+state/canonical·schema·share, the old worklet processors) with the 27
+test files that tested it — their behaviour is the core's tests now.
+What the page still needs of a point's shape is `src/state/types.ts`
+(types only); vitest instantiates the core's wasm (`tests/setup.ts`), and
+the library/link tests make their points with it. AGENTS.md's module map,
+README and PLAN.md "Architecture" describe the shell around the core.
+`main` publishes to Pages through CI; the points Worker was deployed with
+the core's validation (`npm run deploy:cloud`).
+
 ### 10. After the swap: `preset_name` (C11)
 
 The core's TODO item, done once in the core.
 
-## Open questions (to decide when the phase comes)
+## Open questions
 
-- How the user previews the `core` branch on a phone before the swap
-  (C7): GitHub Pages serves one site. Options: a CI artifact served
-  locally, or a separate preview host — decide in phase 8, before phase 9.
-- The scout's render configuration (phase 4, by measurement).
-- Whether `src/analysis/picture.ts` moves to the core or stays (phase 1:
-  depends on whether it needs the GPU's state).
+None left: the preview (phase 8) and the scout's render (phase 4) are decided above.

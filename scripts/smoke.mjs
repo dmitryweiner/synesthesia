@@ -39,6 +39,9 @@ function samePoint(a, b) {
 
 const errors = [];
 let ctxLabel = 'boot';
+// SMOKE_VERBOSE=1: say which step is running every 30 s — a step that
+// waits on a stalled audio device can otherwise hang without a word.
+if (process.env.SMOKE_VERBOSE) setInterval(() => console.log(`… ${ctxLabel}`), 30000).unref();
 const browser = await launchBrowser();
 const context = await browser.newContext({
   viewport: flags.has('mobile') ? { width: 390, height: 844 } : { width: 1280, height: 820 },
@@ -350,6 +353,23 @@ for (const v of values) {
   check(await page.locator('#undoBtn').isDisabled(), 'loading a preset should clear history');
 }
 
+// --- the sound reaches the picture: the core's feature frames (PLAN-CORE.md
+// phase 3) drive the exposure pulse, and its onset hits seed growth ---
+ctxLabel = 'features';
+{
+  const bells = values.find((v) => v === 'b:10') ?? values[0];
+  await pickPoint(bells); // Bell spots: struck, a hit every few seconds
+  const hits0 = await page.evaluate(() => Number(document.body.dataset.fxHits ?? 0));
+  const gotHit = await page.waitForFunction((h) => Number(document.body.dataset.fxHits ?? 0) > h, hits0, { timeout: 15000 })
+    .then(() => true).catch(() => false);
+  check(gotHit, 'no onset hit reached the picture in 15 s of Bell spots');
+  const breathes = await page.waitForFunction(() => {
+    const [lo, hi] = (document.body.dataset.fxExposure ?? '1-1').split('-').map(Number);
+    return hi - lo > 0.01;
+  }, null, { timeout: 15000 }).then(() => true).catch(() => false);
+  check(breathes, `the exposure does not follow the sound (data-fx-exposure=${await page.evaluate(() => document.body.dataset.fxExposure)})`);
+}
+
 // --- ?preset=N query param ---
 ctxLabel = 'preset-query';
 const qp = await context.newPage();
@@ -611,6 +631,75 @@ ctxLabel = 'tune';
   check(Math.max(cw, ch) <= maxSide, `canvas ${d.canvas} exceeds rung ${d.tuned} (max side ${maxSide})`);
   check(await tuned.locator('#webglError').isHidden(), 'WebGL error on the auto-tuned page');
   await tuned.close();
+}
+
+// --- the CPU picture (PLAN-CORE.md C8): what a browser without WebGL2 float
+// targets draws; ?cpu=1 forces it ---
+ctxLabel = 'cpu';
+{
+  const cpu = await context.newPage();
+  captureErrors(cpu, errors, () => 'cpu');
+  await openApp(cpu, withParam(app(BASE), 'cpu', '1'));
+  check(await cpu.evaluate(() => document.body.dataset.renderer) === 'cpu', 'the CPU picture did not take over with ?cpu=1');
+  await cpu.waitForTimeout(1500);
+  const spread = await cpu.evaluate(() => {
+    const c = document.getElementById('view');
+    if (!(c instanceof HTMLCanvasElement)) return 0;
+    const px = c.getContext('2d')?.getImageData(0, 0, c.width, c.height).data ?? new Uint8ClampedArray(0);
+    let lo = 255; let hi = 0;
+    for (let i = 0; i < px.length; i += 4) { lo = Math.min(lo, px[i + 1]); hi = Math.max(hi, px[i + 1]); }
+    return hi - lo;
+  });
+  check(spread > 30, `the CPU picture is blank (green spread ${spread})`);
+  check(await cpu.locator('#webglError').isHidden(), 'WebGL error shown although the CPU picture draws');
+  await cpu.close();
+}
+
+// --- the GPU picture and the CPU picture are the same picture (as
+// synesthesia-android's PictureTest): one seeded field, the same three
+// frames, drawn both ways; a different seed is the control ---
+ctxLabel = 'gpu-cpu';
+{
+  const r = await page.evaluate(async () => {
+    const { initCore } = await import('/src/core/session.ts');
+    const { WebPicture, parseFrame, parseSeed } = await import('/src/core/picture.ts');
+    const { presetStateJson } = await import('/src/core/pkg/syn_wasm.js');
+    const { SimEngine } = await import('/src/sim/engine.ts');
+    await initCore();
+    const PX = 64;
+    const canvas = document.createElement('canvas');
+    canvas.width = PX; canvas.height = PX;
+    const point = presetStateJson(0) ?? '';
+    const driver = new WebPicture(21, point, false, 0);
+    driver.useCpu(21, PX, PX);
+    const [gw, gh] = driver.cpuGrid();
+    const sim = new SimEngine({ canvas, width: gw, height: gh });
+    const seed = parseSeed(driver.reseed());
+    sim.reseed(seed);
+    driver.cpuSeed(new Float32Array(seed.xy), seed.radius);
+    let gpu = new Uint8Array(0); let cpu = new Uint8Array(0);
+    let t = 0;
+    for (let i = 0; i < 3; i++) {
+      t += 1 / 30;
+      const f = parseFrame(driver.frame(t, new Float64Array(0), sim.aspect));
+      sim.step(f); sim.render(f);
+      gpu = new Uint8Array(PX * PX * 4);
+      sim.gl.readPixels(0, 0, PX, PX, sim.gl.RGBA, sim.gl.UNSIGNED_BYTE, gpu);
+      cpu = driver.cpuFrame();
+    }
+    const other = new WebPicture(22, point, false, 0);
+    other.useCpu(22, PX, PX);
+    const s2 = parseSeed(other.reseed());
+    other.cpuSeed(new Float32Array(s2.xy), s2.radius);
+    other.frame(1 / 30, new Float64Array(0), 1);
+    const unrelated = other.cpuFrame();
+    const diff = (a, b) => { let sum = 0; let n = 0; for (let i = 0; i < a.length; i++) { if (i % 4 === 3) continue; sum += Math.abs(a[i] - b[i]); n++; } return sum / n; };
+    return { size: [gpu.length, cpu.length], grid: `${gw}x${gh}`, agreement: diff(gpu, cpu), control: diff(unrelated, cpu) };
+  });
+  check(r.size[0] === r.size[1], `GPU and CPU pictures differ in size: ${r.size}`);
+  check(r.control > 4 * r.agreement, `GPU vs CPU ${r.agreement.toFixed(2)} apart, two different fields ${r.control.toFixed(2)} — not the same picture`);
+  check(r.agreement < 12, `GPU and CPU agree only to ${r.agreement.toFixed(2)} of 255 (grid ${r.grid})`);
+  console.log(`gpu-cpu: ${r.agreement.toFixed(2)} apart (control ${r.control.toFixed(2)}), grid ${r.grid}`);
 }
 
 // --- stop audio ---

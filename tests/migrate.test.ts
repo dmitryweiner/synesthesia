@@ -1,8 +1,8 @@
 // Moving points saved by the old build (whole states in localStorage) into
 // the library (names + cloud ids). Nothing may be lost on the way, including
 // when the browser refuses to write.
-import { defaultAppState } from '../src/state/schema';
-import type { AppState } from '../src/state/schema';
+import { defaultPoint as defaultAppState } from './points';
+import type { AppState } from '../src/state/types';
 import type { SavedPoint } from '../src/state/library';
 import type { UserPreset } from '../src/state/userPresets';
 import type { SaveResult } from '../src/state/store';

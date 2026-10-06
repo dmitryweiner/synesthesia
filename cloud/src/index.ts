@@ -3,12 +3,22 @@
 //                        → 201 { id } (new) | 200 { id } (already stored)
 //   GET  /v1/points/:id  → the stored point (immutable, cacheable forever)
 //   GET  /v1/health
-// The point is validated with the app's own sanitizeState/stateToAppState
-// (imported from ../../src, bundled by esbuild) and stored as canonical JSON;
-// the id is derived from that JSON (src/state/canonical.ts), so the same
-// point always gets the same id and re-sharing is idempotent.
-import { sanitizeState, stateToAppState } from '../../src/state/schema';
-import { canonicalJson, isPresetId, presetIdOf } from '../../src/state/canonical';
+// The point is validated by the core (synesthesia-core syn_core::point, as
+// wasm — PLAN-CORE.md C5) and stored as canonical JSON; the id is derived
+// from that JSON, so the same point always gets the same id and re-sharing
+// is idempotent. The core reproduces the TypeScript that did this before it
+// byte for byte (its fixtures/points.json, the stored points included), so
+// every old link keeps its id.
+import wasmModule from './syn_wasm_bg.wasm';
+import { initSync, pointId, sanitizePoint } from '../../src/core/pkg/syn_wasm.js';
+
+let coreReady = false;
+/** The core, instantiated once per isolate, on the first request that needs it. */
+function core(): void {
+  if (coreReady) return;
+  initSync({ module: wasmModule });
+  coreReady = true;
+}
 
 interface Env {
   DB: D1Database;
@@ -76,10 +86,12 @@ async function savePoint(req: Request, env: Env): Promise<Response> {
   } catch {
     fail(400, 'invalid JSON');
   }
-  const partial = sanitizeState(raw);
-  if (!partial) fail(422, 'invalid point');
-  const body = canonicalJson(stateToAppState(partial));
-  const id = await presetIdOf(body);
+  core();
+  // JSON.parse first and the core second: what reached here is JSON, and the
+  // core reads it as the TypeScript's JSON.stringify writes it
+  const body = sanitizePoint(JSON.stringify(raw));
+  if (body === undefined) fail(422, 'invalid point');
+  const id = pointId(body);
   let res: D1Result;
   try {
     res = await env.DB.prepare('INSERT OR IGNORE INTO points (id, body, bytes, created) VALUES (?, ?, ?, ?)')
@@ -93,7 +105,7 @@ async function savePoint(req: Request, env: Env): Promise<Response> {
 
 async function loadPoint(req: Request, env: Env, id: string): Promise<Response> {
   await limit(env.READ_LIMIT, req);
-  if (!isPresetId(id)) fail(404, 'point not found');
+  if (!/^[0-9A-Za-z]{10}$/.test(id)) fail(404, 'point not found');
   const row = await env.DB.prepare('SELECT body FROM points WHERE id = ?').bind(id).first<{ body: string }>();
   if (!row) fail(404, 'point not found');
   return new Response(row.body, {

@@ -1,9 +1,8 @@
 // Client of the points Worker (cloud/, PLAN.md decision 9): POST a point →
 // short content-addressed id; GET an id → the point. fetch is injectable for
 // tests; every request has a timeout so a dead network never hangs Share.
-import type { AppState, PartialAppState } from './schema';
-import { sanitizeState } from './schema';
-import { isPresetId } from './canonical';
+import type { AppState } from './types';
+import { isPointId, sanitize } from '../core/point';
 
 export const PRESETS_API = 'https://synesthesia-presets.dmitry-weiner.workers.dev';
 
@@ -40,17 +39,17 @@ export async function sharePoint(state: AppState, opts: CloudOptions = {}): Prom
   if (!res.ok) throw new Error(`share failed: HTTP ${res.status}`);
   const body: unknown = await res.json();
   const id = isRecord(body) ? body.id : undefined;
-  if (typeof id !== 'string' || !isPresetId(id)) throw new Error('share failed: malformed reply');
+  if (typeof id !== 'string' || !isPointId(id)) throw new Error('share failed: malformed reply');
   return id;
 }
 
-/** The point behind an id (sanitized), or null if it doesn't exist / can't be read. */
-export async function fetchPoint(id: string, opts: CloudOptions = {}): Promise<PartialAppState | null> {
-  if (!isPresetId(id)) return null;
+/** The point behind an id (sanitized by the core), or null if it doesn't exist / can't be read. */
+export async function fetchPoint(id: string, opts: CloudOptions = {}): Promise<AppState | null> {
+  if (!isPointId(id)) return null;
   try {
     const res = await request(`/v1/points/${id}`, { method: 'GET' }, opts);
     if (!res.ok) return null;
-    return sanitizeState(await res.json());
+    return sanitize(await res.json());
   } catch {
     return null;
   }

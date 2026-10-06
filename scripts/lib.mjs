@@ -119,12 +119,14 @@ export async function startPointsWorker(port = 8787) {
   if (!existsSync(`${CLOUD}node_modules/miniflare`)) {
     throw new Error('cloud/node_modules missing — run `npm install` in cloud/ first');
   }
-  execFileSync('npx', ['esbuild', 'src/index.ts', '--bundle', '--format=esm', '--platform=browser', '--outfile=dist/index.js', '--log-level=warning'], { cwd: CLOUD });
+  execFileSync('npm', ['run', '--silent', 'build'], { cwd: CLOUD, stdio: 'ignore' }); // the bundle + the core's wasm
   const require = createRequire(`${CLOUD}package.json`);
   const { Miniflare, convertV4MiniflareOptions } = await import(pathToFileURL(require.resolve('miniflare')).href);
   const mf = new Miniflare(convertV4MiniflareOptions({
-    modules: true,
-    script: readFileSync(`${CLOUD}dist/index.js`, 'utf8'),
+    modules: [
+      { type: 'ESModule', path: `${CLOUD}dist/index.js` },
+      { type: 'CompiledWasm', path: `${CLOUD}dist/syn_wasm_bg.wasm` },
+    ],
     compatibilityDate: '2026-09-01',
     port,
     bindings: { ALLOWED_ORIGINS: 'http://localhost:5173 http://localhost:4173' },

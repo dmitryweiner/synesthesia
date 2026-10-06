@@ -1,50 +1,18 @@
-import { canonicalJson, presetIdOf, isPresetId, PRESET_ID_LENGTH } from '../src/state/canonical';
-import { parseLaunch, cleanUrl, withPresetId } from '../src/state/launch';
+import { cleanUrl, withPresetId } from '../src/state/launch';
+import { encodeToken, parseLaunch } from '../src/core/session';
 import { sharePoint, fetchPoint, PRESETS_API } from '../src/state/cloud';
 import { saveLastPoint, loadLastPoint, LAST_POINT_KEY } from '../src/state/lastPoint';
-import { defaultAppState, stateToAppState } from '../src/state/schema';
-import { encodeStateToken } from '../src/state/share';
-import { PRESETS } from '../src/presets';
-
-describe('canonicalJson', () => {
-  it('sorts object keys at every depth, keeps array order', () => {
-    expect(canonicalJson({ b: 1, a: { d: [3, { z: 1, y: 2 }], c: null } })).toBe('{"a":{"c":null,"d":[3,{"y":2,"z":1}]},"b":1}');
-  });
-
-  it('is independent of key insertion order', () => {
-    expect(canonicalJson({ x: 1, y: 2 })).toBe(canonicalJson({ y: 2, x: 1 }));
-  });
-});
-
-describe('presetIdOf', () => {
-  it('10 base62 characters, deterministic', async () => {
-    const a = await presetIdOf('{"a":1}');
-    expect(a).toMatch(/^[0-9A-Za-z]{10}$/);
-    expect(a.length).toBe(PRESET_ID_LENGTH);
-    expect(await presetIdOf('{"a":1}')).toBe(a);
-    expect(await presetIdOf('{"a":2}')).not.toBe(a);
-  });
-
-  it('distinct presets get distinct ids', async () => {
-    const ids = await Promise.all(PRESETS.map((p) => presetIdOf(canonicalJson(p.state))));
-    expect(new Set(ids).size).toBe(PRESETS.length);
-  });
-
-  it('isPresetId', () => {
-    expect(isPresetId('Ab3xK9pQ2m')).toBe(true);
-    expect(isPresetId('Ab3xK9pQ2')).toBe(false);
-    expect(isPresetId('Ab3xK9pQ2m!')).toBe(false);
-    expect(isPresetId('Ab3xK9-Q2m')).toBe(false);
-  });
-});
+import { defaultPoint as defaultAppState } from './points';
 
 describe('launch URL', () => {
   const base = 'https://dmitryweiner.github.io/synesthesia/';
 
+  // The rules live in the core (syn-core share.rs); this checks the page's view of them.
   it('priority: presetId > #s= token > ?preset=N > none', () => {
-    const token = encodeStateToken(defaultAppState());
+    const point = defaultAppState();
+    const token = encodeToken(point);
     expect(parseLaunch(`${base}?presetId=Ab3xK9pQ2m&preset=2#s=${token}`)).toEqual({ kind: 'presetId', id: 'Ab3xK9pQ2m' });
-    expect(parseLaunch(`${base}?preset=2#s=${token}`)).toEqual({ kind: 'token', token });
+    expect(parseLaunch(`${base}?preset=2#s=${token}`)).toEqual({ kind: 'point', point });
     expect(parseLaunch(`${base}?preset=2`)).toEqual({ kind: 'preset', index: 2 });
     expect(parseLaunch(base)).toEqual({ kind: 'none' });
   });
@@ -110,7 +78,7 @@ describe('cloud client', () => {
     const ok = fakeFetch(() => Response.json({ ...s, junk: 1 }));
     const got = await fetchPoint('Ab3xK9pQ2m', { fetch: ok.fetch, api: 'https://api.test' });
     expect(ok.calls[0].url).toBe('https://api.test/v1/points/Ab3xK9pQ2m');
-    expect(got && stateToAppState(got)).toEqual(s);
+    expect(got).toEqual(s);
     const missing = fakeFetch(() => new Response('{}', { status: 404 }));
     expect(await fetchPoint('Ab3xK9pQ2m', { fetch: missing.fetch })).toBeNull();
     const none = fakeFetch(() => Response.json(s));

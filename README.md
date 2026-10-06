@@ -4,7 +4,7 @@ Sound and image generated together from one point in a large parameter
 space, and steered by you. Press 👍 when you like where it's going, 👎 when
 you don't, and the search follows.
 
-**Live:** GitHub Pages build in [`docs/`](docs/).
+**Live:** GitHub Pages, built and published by CI ([`.github/workflows/pages.yml`](.github/workflows/pages.yml)).
 
 ## How it works
 
@@ -95,14 +95,22 @@ development only.)
 
 ## Development
 
+The model — sound, analysis, genome and search, the picture's decisions,
+presets — is the shared Rust core,
+[synesthesia-core](https://github.com/dmitryweiner/synesthesia-core),
+compiled to wasm. `package.json` pins its revision
+(`synesthesiaCore.rev`); `npm run core` clones and builds it into
+`src/core/pkg/` (needs Rust with the `wasm32-unknown-unknown` target and
+`wasm-pack`), and every command below runs it first.
+
 ```bash
 npm install
 npm run dev            # Vite on :5173
 npm run check          # tsc --noEmit && eslint . && vitest run
-npm run build          # type-check + build into ./docs (GitHub Pages)
+npm run build          # type-check + build into ./dist (CI publishes it to Pages)
 npm run smoke          # Playwright browser smoke (WebGL2 + Web Audio)
 npm run snap -- --out shots/x.png [--preset N] [--sound] [--like N] [--details]
-npm run analyze        # fractality of every preset's actual sound
+npm run analyze -- --render | --picture   # frame rate; the picture in numbers
 ```
 
 `npm run smoke` and friends need a Playwright Chromium
@@ -122,11 +130,10 @@ https://synesthesia-presets.dmitry-weiner.workers.dev:
 | `GET /v1/points/:id` | the point; immutable, cached for a year |
 | `GET /v1/health` | `{ ok: true }` |
 
-The Worker validates points with the app's own `sanitizeState` /
-`stateToAppState` (bundled from `src/`) and derives the id from the
-canonical JSON (`src/state/canonical.ts`): first 10 base62 characters of
-its SHA-256. Limits: 20 saves / min and 300 reads / min per IP, 5 000 new
-points a day, 500 000 in total.
+The Worker validates points with the core (the same wasm as the app:
+`sanitizePoint`) and derives the id from the canonical JSON: first 10
+base62 characters of its SHA-256 (`pointId`). Limits: 20 saves / min and
+300 reads / min per IP, 5 000 new points a day, 500 000 in total.
 
 ```bash
 npm run check:cloud    # worker type-check + Miniflare tests
@@ -135,58 +142,19 @@ npm run deploy:cloud   # apply D1 migrations + wrangler deploy
 
 ### Sound analysis
 
-`scripts/analyze.mjs` renders points through the app's real audio graph
-(worklet generators + FX + LFOs) in an `OfflineAudioContext` inside headless
-Chromium and reports, per point:
-
-| column | meaning |
-|---|---|
-| `envβ` | β of the 1/f^β spectrum of the loudness contour (pink = 1, white = 0, brown = 2) |
-| `cenβ` | same for the spectral-centroid (timbre/pitch) contour |
-| `HFD` | Higuchi fractal dimension of the loudness contour |
-| `box` | box-counting dimension of the spectrogram's loudest cells |
-| `score` | the above folded into 0..1 (`src/analysis/fractal.ts`) |
-
-With `--character` (`src/analysis/character.ts`) it also says what *kind*
-of sound it is:
-
-| column | meaning |
-|---|---|
-| `drop` | how deep the sound falls out: median minus 5th percentile of 400 ms loudness, dB |
-| `swing` | how far it breathes: 95th minus 5th percentile, dB |
-| `low` | share of energy below 200 Hz (weight) |
-| `harm` | share of spectral-peak energy on one harmonic grid |
-| `rough` | Plomp–Levelt roughness of the peaks (level-independent) |
-| `mot1` / `mot10` | how much the spectrum changes over 1 s / 10 s, dB |
-
-```bash
-node scripts/analyze.mjs --random 12              # presets vs random points
-node scripts/analyze.mjs --preset 0 --mutants 8   # what 👍/👎 would propose
-node scripts/analyze.mjs --mutants 5 --configs 30@22050,8@16000
-                                                  # how well a short render predicts a long one
-node scripts/analyze.mjs --preset 0 --wav shots/wav
-node scripts/analyze.mjs --switch 0,3,10,7 --at 12  # clicks at preset switches
-node scripts/analyze.mjs --onsets                  # onset hits per preset at 60/30/15 fps
-node scripts/analyze.mjs --preset 12 --repeat 4     # mean ± sd over 4 seeded reverb rooms (a render repeats exactly)
-node scripts/analyze.mjs --preset 12 --secs 60 --png shots/png
-                                                  # a log-frequency waterfall + loudness picture per render
-node scripts/analyze.mjs --picture --preset 13,14  # the PICTURE in numbers: coverage, edges, change over 5 min
-node scripts/analyze.mjs --character --ref 0,3,5,6,8
-                                                  # + character columns, and every point's distance
-                                                  #   to a reference group of presets
-node scripts/analyze.mjs --render                  # frames per second, per grid × canvas
-node scripts/analyze.mjs --render --passes         # ms per pass (fields / react / display)
-```
-
-First results: built-in presets score 0.79 ± 0.14 against 0.55 ± 0.31 for
-random points, and *Fractal garden* (tuned by ear for waterfall fractality
-in formula-synth) scores highest at 0.97.
+The sound is measured on the core, with its `syn-bench` (fractality of a
+point, its character and distance to the liked presets, onset hits, clicks
+at switches, how well the scout's cheap render ranks candidates, WAVs and
+waterfall PNGs) — see synesthesia-core's README. Built-in presets score
+0.79 ± 0.14 against 0.55 ± 0.31 for random points; *Fractal garden*
+(tuned by ear for waterfall fractality in formula-synth) scores highest.
 
 ## Stack
 
-TypeScript, Vite, vitest, ESLint (no `as` casts), Playwright. No UI
-framework and no runtime dependencies: Web Audio `AudioWorklet` for sound,
-raw WebGL2 for the image.
+Rust (synesthesia-core, wasm-bindgen) for the model; TypeScript, Vite,
+vitest, ESLint (no `as` casts), Playwright for the page. No UI framework
+and no runtime dependencies: the core plays inside an `AudioWorklet`, the
+scout runs on Web Workers, the image is raw WebGL2 (with a CPU fallback).
 
 ## License
 

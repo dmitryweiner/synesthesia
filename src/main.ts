@@ -1,27 +1,18 @@
-// App wiring: the two engines, the rAF loop (visual sim + LFO/coupling),
-// the explorer (like / dislike / surprise / undo), morphing between points,
-// presets, share links and the small HUD. Everything with logic worth
-// testing lives in pure modules; this file only connects them.
+// App wiring: the core's session (like / dislike / surprise / undo, morphs,
+// the scout) and its effects → the sound worklet, the picture driver and
+// SimEngine, storage, share links and the small HUD. The logic lives in the
+// core (src/core/*) and in small tested modules; this file only connects them.
 import './style.css';
 import { el, make } from './ui/dom';
 import { renderDetails } from './ui/details';
 import { SimEngine } from './sim/engine';
-import { gridSize } from './sim/grid';
-import { QUALITY_LADDER, QualityProbe, TOP_RUNG, backingStore } from './sim/quality';
-import { AudioEngine } from './audio/engine';
+import { CpuRenderer, type Renderer } from './sim/cpuRenderer';
+import { WebPicture, canvasSize, gridFor, ladderRungs, parseFrame, parseSeed, rungOf } from './core/picture';
+import { CoreEngine } from './audio/coreEngine';
 import { IosAudioUnlock } from './audio/iosUnlock';
-import { FeatureTracker, OnsetDetector, SILENT_FEATURES } from './audio/features';
-import type { AudioFeatures } from './audio/features';
-import { effectiveParams } from './dsp/mod';
-import { CARDS, cardSliderRanges } from './schema/visual';
-import { fieldVariationParamsFromCard, flowParamsFromCard, reactionParamsFromCard, ZERO_FIELD_VARIATION, ZERO_FLOW } from './sim/params';
-import { composePalette, palettesByIndex } from './palette';
-import { applyCoupling } from './coupling';
-import { RippleSet, displayCoupling } from './visualFx';
-import type { AppState } from './state/schema';
-import { cloneAppState, stateToAppState } from './state/schema';
-import { decodeStateToken, encodeStateToken } from './state/share';
-import { cleanUrl, parseLaunch, withPresetId } from './state/launch';
+import type { AppState } from './state/types';
+import { DEFAULT_PRESET_INDEX, builtInPresets } from './core/point';
+import { cleanUrl, withPresetId } from './state/launch';
 import { fetchPoint, sharePoint } from './state/cloud';
 import { loadLastPoint, saveLastPoint } from './state/lastPoint';
 import { loadUserPresets, saveUserPresets, clearUserPresets } from './state/userPresets';
@@ -31,37 +22,30 @@ import { migrateLegacyPoints } from './state/migrate';
 import { renderPointList } from './ui/pointList';
 import type { PointRow } from './ui/pointList';
 import { ScreenAwake, browserWakeLockEnv } from './ui/wakelock';
-import {
-  canvasUv, strokePoints, TOUCH_AMOUNT, TOUCH_MAX_STAMPS, TOUCH_RADIUS, TOUCH_SPACING,
-} from './ui/touch';
+import { canvasUv } from './ui/touch';
+import { FRAME } from './core/protocol';
 import { askConfirm, askText } from './ui/askDialog';
 import type { UserPreset } from './state/userPresets';
-import { PRESETS, DEFAULT_PRESET_INDEX } from './presets';
-import { decodeGenome, encodeGenome } from './genome/codec';
-import type { Genome } from './genome/codec';
-import { diffSummary, lerpGenome } from './genome/evolve';
-import { Explorer } from './genome/explorer';
-import type { ExplorerAction } from './genome/explorer';
-import { Scout } from './genome/scout';
-import type { ScoutPick } from './genome/scout';
-import { analyzeSound } from './analysis/fractal';
 import { SettingsPage } from './ui/settings';
+import { WebSession, encodeToken, initCore, parseEffects, parseLaunch, pointOf, scoutParentOf, viewOf } from './core/session';
+import type { SessionView } from './core/session';
+import { compileCore } from './core/audio';
+import { ScoutPool } from './scout/pool';
+import type { ScoutJob } from './scout/protocol';
 import { samePoint } from './ui/settingsModel';
 
-const MORPH_SECONDS = 2.0;
-const UNDO_MORPH_SECONDS = 0.8;
-const AUDIO_PUSH_INTERVAL = 0.05; // s — how often a morph re-sends params to the worklets
+const AUDIO_PUSH_INTERVAL = 0.05; // s — how often a Settings drag re-sends the point to the sound
 const HELP_SHOWN_KEY = 'synesthesia_help_shown';
 // Scout (PLAN.md decision 7): offline-render + score candidates in the
-// background while the user listens. `?scout=0` turns it off.
-const SCOUT_ENABLED = new URLSearchParams(location.search).get('scout') !== '0';
-// 24 s at 8 kHz costs about the same as 8 s at 16 kHz but ranks candidates
-// far closer to a 30 s / 22 kHz reference (Spearman ρ 0.73 vs 0.23, measured
-// with `analyze.mjs --configs`): slow LFOs need the long window, the fractal
-// metrics don't need high frequencies.
-const SCOUT_SECONDS = 24;
-const SCOUT_SR = 8000;
-const SCOUT_DELAY_MS = 800; // after a morph settles, before rendering starts
+// background while the user listens. `?scout=0` turns it off; `?scout=30@22050`
+// renders 30 s at 22 050 Hz per candidate. Without it, the core's choice
+// (syn-session ScoutConfig) — PLAN-CORE.md phase 4 measures which.
+const SCOUT_PARAM = new URLSearchParams(location.search).get('scout');
+const SCOUT_ENABLED = SCOUT_PARAM !== '0';
+const SCOUT_CONFIG = ((): { seconds: number; sampleRate: number } => {
+  const m = /^(\d+(?:\.\d+)?)@(\d+)$/.exec(SCOUT_PARAM ?? '');
+  return m ? { seconds: Number(m[1]), sampleRate: Number(m[2]) } : { seconds: 0, sampleRate: 0 };
+})();
 
 const canvas = el('view', HTMLCanvasElement);
 const webglError = el('webglError', HTMLParagraphElement);
@@ -90,13 +74,9 @@ const surpriseBtn = el('surpriseBtn', HTMLButtonElement);
 const settingsBtn = el('settingsBtn', HTMLButtonElement);
 const settingsSoundBtn = el('settingsSoundBtn', HTMLButtonElement);
 
-// Slider ranges per visual card, for the LFO matrix's effectiveParams clamp.
-const VISUAL_RANGES: Record<string, Record<string, readonly [number, number]>> = {};
-for (const card of CARDS) VISUAL_RANGES[card.id] = cardSliderRanges(card);
-
 function resizeCanvas(): void {
   const rect = canvas.getBoundingClientRect();
-  const store = backingStore(canvasCap(), rect.width, rect.height, window.devicePixelRatio || 1);
+  const store = canvasSize(canvasCap(), rect.width, rect.height, window.devicePixelRatio || 1);
   canvas.width = store.width;
   canvas.height = store.height;
   document.body.dataset.canvas = `${store.width}x${store.height}`;
@@ -177,40 +157,70 @@ const SCALE_OVERRIDE = intParam('scale', 64, 8192);          // 0 = uncapped, on
 // with the user: measured once at boot, never moved under the viewer). The
 // old test was `min(innerWidth, innerHeight) < 700` — a device test that a
 // 1080p board with no GPU at all passes, and then renders at 0.4 fps.
-const probe = RES_OVERRIDE === undefined && SCALE_OVERRIDE === undefined ? new QualityProbe() : null;
+const MEASURE = RES_OVERRIDE === undefined && SCALE_OVERRIDE === undefined;
+// `?cpu=1`: draw with the CPU fallback even where WebGL2 works (C8).
+const FORCE_CPU = new URLSearchParams(location.search).get('cpu') === '1';
+// The core's picture driver: per-frame uniforms, the boot probe, the CPU
+// picture. Made in boot(), once the wasm is in.
+let picture: WebPicture | null = null;
 // Frames to let pass before the probe believes anything: shader compilation,
 // the opening morph and the point load all land in the first few and none of
 // them is the steady state.
 const BOOT_WARMUP_FRAMES = 8;
 
-function currentRung(): number {
-  return probe ? probe.rung : TOP_RUNG;
+function currentRung(): { maxSide: number; res: number } {
+  const ladder = ladderRungs();
+  return picture ? rungOf(picture) : ladder[ladder.length - 1];
 }
 
 function simResolution(): number {
-  return RES_OVERRIDE ?? QUALITY_LADDER[currentRung()].res;
+  return RES_OVERRIDE ?? currentRung().res;
 }
 
 function canvasCap(): number {
-  return SCALE_OVERRIDE ?? QUALITY_LADDER[currentRung()].maxSide;
+  return SCALE_OVERRIDE ?? currentRung().maxSide;
 }
 
-function boot(): void {
-  resizeCanvas();
-  let sim: SimEngine;
+async function boot(): Promise<void> {
+  // The core (session, scout, sound) is wasm: instantiated before anything
+  // that asks it a question.
   try {
-    sim = new SimEngine({ canvas, ...gridSize(simResolution(), canvas.width, canvas.height) });
+    await initCore();
   } catch (err) {
-    webglError.hidden = false;
-    status.textContent = err instanceof Error ? err.message : 'WebGL2 unavailable.';
+    status.textContent = `The engine failed to load: ${err instanceof Error ? err.message : String(err)}`;
     return;
   }
+  const PRESETS = builtInPresets(); // the core's, in its order (?preset=N)
+  const ladder = ladderRungs();
+  const pic = new WebPicture(
+    Math.floor(Math.random() * 2 ** 32), JSON.stringify(PRESETS[DEFAULT_PRESET_INDEX].state),
+    MEASURE && !FORCE_CPU, ladder.length - 1,
+  );
+  picture = pic;
+  resizeCanvas();
+  let sim: Renderer;
+  try {
+    if (FORCE_CPU) throw new Error('?cpu=1');
+    sim = new SimEngine({ canvas, ...gridFor(simResolution(), canvas.width, canvas.height) });
+  } catch (err) {
+    // No WebGL2 with float targets: the core's CPU picture draws instead (C8).
+    try {
+      sim = new CpuRenderer(canvas, pic, Math.floor(Math.random() * 2 ** 32));
+    } catch {
+      webglError.hidden = false;
+      status.textContent = err instanceof Error ? err.message : 'WebGL2 unavailable.';
+      return;
+    }
+    document.body.dataset.renderer = 'cpu';
+  }
   if (PROBE) window.synesthesiaProbe = () => sim.readState();
+  const reseed = (): void => sim.reseed(parseSeed(pic.reseed()));
+  reseed();
   // Canvas and grid always move together: the display pass is bound by the
   // one and every reaction substep by the other.
   function applyQuality(): void {
     resizeCanvas();
-    const g = gridSize(simResolution(), canvas.width, canvas.height);
+    const g = gridFor(simResolution(), canvas.width, canvas.height);
     sim.setGrid(g.width, g.height);
     document.body.dataset.grid = `${g.width}x${g.height}`;
   }
@@ -220,17 +230,14 @@ function boot(): void {
   let framesSeen = 0;
   /** Feeds the boot probe one real frame time (unclamped: a 2 s frame must read as 2 s). */
   function tune(frameMs: number): void {
-    if (!probe || probe.done) return;
+    if (!MEASURE || pic.probeDone()) return;
     if (++framesSeen <= BOOT_WARMUP_FRAMES) return;
-    if (probe.frame(frameMs)) applyQuality();
-    if (probe.done) document.body.dataset.tuned = String(probe.rung);
+    if (pic.probeFrame(frameMs)) applyQuality();
+    if (pic.probeDone()) document.body.dataset.tuned = String(rungOf(pic).index);
   }
 
-  const audio = new AudioEngine();
+  const audio = new CoreEngine();
   const iosUnlock = new IosAudioUnlock();
-  let features: AudioFeatures = { ...SILENT_FEATURES };
-  const onsets = new OnsetDetector();
-  const ripples = new RippleSet();
   let lastFrame = 0;
   // Observable effect stats for scripts/smoke.mjs (body[data-fx-hits],
   // body[data-fx-exposure] = "min-max" over the last ~2 s).
@@ -238,157 +245,103 @@ function boot(): void {
   let expoMin = 1;
   let expoMax = 1;
   let expoWindowStart = 0;
-  let tracker: FeatureTracker | null = null;
-  let timeDomain = new Float32Array(0);
-  let freqBins = new Uint8Array(0);
 
-  // --- the point --------------------------------------------------------
-  // `state` is the live, fully-decoded AppState of the genome currently
-  // being rendered (during a morph: the interpolated one). masterGain and
-  // presetName aren't genes and are kept on the side.
+  // --- the point and the session -----------------------------------------
+  // What a press, a load, ⚙ Settings or the clock do is decided by the
+  // core's session (PLAN-CORE.md phase 4); applyEffects() gives its effects
+  // their meaning here. `state` is the point the picture draws and Settings
+  // edits: mid-morph, the blend that is audible. masterGain is the volume
+  // slider's, which the session also holds (it is not a gene).
   let masterGain = 0.75;
-  let presetName: string | undefined;
   let state: AppState = PRESETS[DEFAULT_PRESET_INDEX].state;
-  const explorer = new Explorer(encodeGenome(state));
-  let stepCount = 0;
+  const session = new WebSession(
+    '', JSON.stringify(state), Math.floor(Math.random() * 2 ** 32),
+    SCOUT_ENABLED, SCOUT_CONFIG.seconds, SCOUT_CONFIG.sampleRate,
+  );
+  let view: SessionView = viewOf(session);
+  const nowS = (): number => performance.now() / 1000;
 
-  // Morph bookkeeping: `live` eases from `morphFrom` to `morphTo`; a press
-  // mid-morph starts the next morph from `live` (what's audible/visible now).
-  let morphFrom: Genome = explorer.current;
-  let morphTo: Genome = explorer.current;
-  let live: Genome = explorer.current;
-  let morphStart = 0;
-  let morphSeconds = MORPH_SECONDS;
-  let morphDone = true;
-  let lastAudioPush = -1;
+  // The LFO clock is the picture driver's (the heard sound's own time while
+  // it plays, a continuation of it when it does not) — see the frame loop.
 
-  // --- shared LFO clock ---------------------------------------------------
-  // Audio worklets run their LFOs on their own sample clock starting at the
-  // moment audio starts; the visual loop follows audio.time whenever audio
-  // runs, so a route on LFO 1 breathes the same way in both.
-  let clockOffset = performance.now() / 1000;
-  function lfoTime(): number {
-    if (audio.running) return audio.time;
-    return performance.now() / 1000 - clockOffset;
-  }
-
-  function applyToEngines(s: AppState, force: boolean): void {
-    state = s;
-    if (audio.running) {
-      const t = lfoTime();
-      if (force || t - lastAudioPush >= AUDIO_PUSH_INTERVAL) {
-        lastAudioPush = t;
-        audio.applyState({ masterGain, fx: s.audio.fx, formulas: s.audio.formulas, mod: s.mod });
+  function applyEffects(json: string, quiet = false): void {
+    for (const e of parseEffects(json)) {
+      if (quiet && e.type === 'status') continue;
+      switch (e.type) {
+        case 'setPoint':
+          state = e.point;
+          if (audio.running) audio.applyState(e.point, e.point.audio.masterGain);
+          break;
+        case 'switchTo':
+          state = e.point;
+          if (audio.running) void audio.switchTo(e.point, e.point.audio.masterGain);
+          break;
+        case 'reseed':
+          reseed();
+          break;
+        case 'saveLastPoint':
+          saveLastPoint(e.point);
+          if (!details.hidden) renderDetails(detailsBody, state, scoutParentOf(session));
+          break;
+        case 'startScout':
+          runScout(e.job);
+          break;
+        case 'status':
+          setStatus(e.text);
+          break;
       }
     }
+    refreshView();
   }
 
-  function startMorph(to: Genome, seconds: number): void {
-    morphFrom = live;
-    morphTo = to;
-    morphStart = performance.now() / 1000;
-    morphSeconds = seconds;
-    morphDone = false;
-  }
-
-  function morphProgress(): number {
-    if (morphDone) return 1;
-    const t = (performance.now() / 1000 - morphStart) / morphSeconds;
-    return Math.max(0, Math.min(1, t));
-  }
-
-  function tickMorph(): void {
-    if (morphDone) return;
-    const p = morphProgress();
-    // ease-in-out so the change reads as a glide, not a jump
-    const eased = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
-    live = lerpGenome(morphFrom, morphTo, p >= 1 ? 1 : eased);
-    applyToEngines(decodeGenome(live), p >= 1);
-    if (p >= 1) {
-      morphDone = true;
-      morphFrom = morphTo;
-      onSettled();
-    }
-  }
+  // The session's clock: a morph a step further, a scout started once the
+  // sound has settled. Independent of the frame loop, which pauses.
+  setInterval(() => {
+    if (!session.wantsTick()) return;
+    applyEffects(session.tick(nowS()));
+    // the picture morphs with or without sound (the session pushes the
+    // point to the sound only while it plays)
+    if (view.morphing || !audio.running) state = pointOf(session.livePointJson());
+  }, 25);
 
   // --- UI state --------------------------------------------------------
   function setStatus(text: string): void {
     status.textContent = text;
   }
 
-  function describeChange(from: Genome, to: Genome): string {
-    const changes = diffSummary(from, to);
-    if (changes.length === 0) return 'nothing changed';
-    const arrow = { up: '↑', down: '↓', on: 'on', off: 'off', switch: '⇄' };
-    const top = changes.slice(0, 5).map((c) => `${c.label} ${arrow[c.dir]}`);
-    const more = changes.length > 5 ? ` +${changes.length - 5} more` : '';
-    return top.join(' · ') + more;
-  }
-
-  function actionLabel(a: ExplorerAction): string {
-    switch (a) {
-      case 'like': return '👍 continuing this way';
-      case 'dislike': return '👎 back to the last liked point, trying elsewhere';
-      case 'surprise': return '🎲 jumped somewhere new';
-      case 'undo': return '↩ undone';
-      case 'edit': return '⚙ set by hand in Settings';
-      case 'load': return 'loaded';
+  function refreshView(): void {
+    view = viewOf(session);
+    undoBtn.disabled = !view.canUndo;
+    setBtnText(undoBtn, view.canUndo ? `↩ Undo (${view.undoDepth})` : '↩ Undo');
+    // for scripts/smoke.mjs: candidates scored, per direction
+    if (view.scoutBusy || view.scoutedLike + view.scoutedDislike > 0) {
+      document.body.dataset.scout = `${view.scoutedLike}/${view.scoutedDislike}`;
+    } else {
+      delete document.body.dataset.scout;
     }
   }
 
-  function refreshUndo(): void {
-    undoBtn.disabled = !explorer.canUndo;
-    setBtnText(undoBtn, explorer.canUndo ? `↩ Undo (${explorer.undoDepth})` : '↩ Undo');
-  }
-
+  /** The point the search is at (mid-morph: where it is heading), with the
+   *  volume and, while it is still one, its name — what a save or a share takes. */
   function currentState(): AppState {
-    const s = cloneAppState(decodeGenome(explorer.current));
-    s.audio.masterGain = masterGain;
-    if (presetName) s.presetName = presetName;
-    return s;
-  }
-
-  // The address bar no longer carries the point (PLAN.md decision 9): it is
-  // kept in localStorage instead, so a reload comes back to it.
-  function onSettled(): void {
-    if (!details.hidden) renderDetails(detailsBody, state, scout?.parent ?? null);
-    saveLastPoint(currentState());
-    scheduleScout();
+    return pointOf(session.pointJson());
   }
 
   // --- scout ---------------------------------------------------------------
-  const scout = SCOUT_ENABLED
-    ? new Scout({
-      k: 3,
-      render: (s) => AudioEngine.renderOffline(
-        { masterGain: s.audio.masterGain, fx: s.audio.fx, formulas: s.audio.formulas, mod: s.mod },
-        SCOUT_SECONDS, SCOUT_SR,
-      ),
-      analyze: (x) => analyzeSound(x, SCOUT_SR),
-      onProgress: () => {
-        document.body.dataset.scout = `${scout?.ready('like') ?? 0}/${scout?.ready('dislike') ?? 0}`;
-        if (!details.hidden) renderDetails(detailsBody, state, scout?.parent ?? null);
-      },
-    })
-    : null;
-  let scoutTimer: ReturnType<typeof setTimeout> | null = null;
+  // The session hands out a job; the pool renders its units in Web Workers
+  // (PLAN-CORE.md C4) and the result goes back to the session, which drops
+  // it if the user has moved on.
+  const scoutPool = new ScoutPool({ module: async () => (await compileCore()).module });
 
-  function scheduleScout(): void {
-    if (!scout || scout.disabled) return;
-    if (scoutTimer !== null) clearTimeout(scoutTimer);
-    scoutTimer = setTimeout(() => {
-      scoutTimer = null;
-      if (!audio.running || !morphDone || settings.isOpen) return;
-      document.body.dataset.scout = '0/0';
-      scout.prepare(explorer, masterGain);
-    }, SCOUT_DELAY_MS);
+  function runScout(job: ScoutJob): void {
+    // quiet: the scout works in the background and never takes the status
+    // line from what the user just did (the count shows in data-scout)
+    void scoutPool.run(job).then((result) => applyEffects(session.scoutFinished(JSON.stringify(result)), true));
   }
 
+  /** Before anything that moves the point: what is still rendering is stale. */
   function stopScout(): void {
-    if (scoutTimer !== null) clearTimeout(scoutTimer);
-    scoutTimer = null;
-    scout?.cancel();
-    delete document.body.dataset.scout;
+    scoutPool.cancel();
   }
 
   // "My points" live in the library (name + cloud id); `legacy` holds points
@@ -442,12 +395,12 @@ function boot(): void {
     if (ref.startsWith('b:')) {
       const p = PRESETS[index];
       if (!p) return;
-      loadState(cloneAppState(p.state), 'loaded');
+      loadState(structuredClone(p.state), 'loaded');
       setPointRef(ref);
     } else if (ref.startsWith('l:')) {
       const p = legacy[index];
       if (!p) return;
-      loadState(cloneAppState(p.state), 'loaded');
+      loadState(structuredClone(p.state), 'loaded');
       setPointRef(ref);
     } else {
       const p = library[index];
@@ -458,7 +411,7 @@ function boot(): void {
           setStatus(`couldn't open “${p.name}” — the points server is unreachable; try again in a moment`);
           return;
         }
-        loadState(stateToAppState(loaded), 'loaded');
+        loadState(loaded, 'loaded');
         setPointRef(ref);
       });
     }
@@ -490,76 +443,46 @@ function boot(): void {
   }
 
   // --- actions -----------------------------------------------------------
-  function afterAction(prev: Genome, seconds: number, pick: ScoutPick | null = null): void {
+  /** A press moves the point away from whatever was loaded: the link that
+   *  named it no longer does, and what the scout was rendering is stale. */
+  function stepAway(): void {
     stopScout();
-    // stepped away from whatever the URL pointed at (shared id / preset)
     history.replaceState(null, '', cleanUrl(location.href));
-    stepCount++;
-    presetName = undefined;
     setPointRef('');
-    startMorph(explorer.current, seconds);
-    refreshUndo();
-    const scouted = pick ? ` · scouted: best of ${pick.of} (fractal ${pick.analysis.score.toFixed(2)})` : '';
-    setStatus(`${actionLabel(explorer.lastAction)} · step ${stepCount} · spread ${explorer.sigma.toFixed(2)}${scouted}\n${describeChange(prev, explorer.current)}`);
   }
 
   function like(): void {
-    const prev = explorer.current;
-    const pick = scout?.take(explorer, 'like') ?? null;
-    explorer.like(pick?.genome);
-    afterAction(prev, MORPH_SECONDS, pick);
+    stepAway();
+    applyEffects(session.like(nowS()));
     flash(likeBtn, '👍 Liked');
   }
 
   function dislike(): void {
-    const prev = explorer.current;
-    const pick = scout?.take(explorer, 'dislike') ?? null;
-    explorer.dislike(pick?.genome);
-    afterAction(prev, MORPH_SECONDS, pick);
+    stepAway();
+    applyEffects(session.dislike(nowS()));
     flash(dislikeBtn, '👎 Noted');
   }
 
   function surprise(): void {
-    const prev = explorer.current;
-    // Any built-in preset except the one we're closest to by name.
-    const pool = PRESETS.filter((p) => p.name !== presetName);
-    const pick = pool[Math.floor(Math.random() * pool.length)] ?? PRESETS[0];
-    explorer.surprise(encodeGenome(pick.state));
-    afterAction(prev, MORPH_SECONDS);
-    sim.reseed();
-    flash(surpriseBtn, `🎲 near "${pick.name}"`);
+    stepAway();
+    applyEffects(session.surprise(nowS()));
+    flash(surpriseBtn, `🎲 ${view.pointName}`); // "near <preset>"
   }
 
   function undo(): void {
-    const prev = explorer.current;
-    if (!explorer.undo()) return;
-    afterAction(prev, UNDO_MORPH_SECONDS);
+    if (!view.canUndo) return;
+    stepAway();
+    applyEffects(session.undo(nowS()));
   }
 
-  /** Load a whole point (preset / link): fresh search, image reseeded. */
+  /** Load a whole point (preset / link): fresh search, a hard switch, image reseeded. */
   function loadState(s: AppState, label: string, url: string = cleanUrl(location.href)): void {
     history.replaceState(null, '', url);
-    presetName = s.presetName;
+    stopScout();
     masterGain = s.audio.masterGain;
     volume.value = String(masterGain);
-    stopScout();
-    explorer.load(encodeGenome(s));
-    stepCount = 0;
-    morphFrom = explorer.current;
-    morphTo = explorer.current;
-    live = explorer.current;
-    morphDone = true;
-    // A hard switch, not a morph: the engine ducks, rebuilds its FX (no tails
-    // of the previous point) and fades the new one in — see switchTo().
-    state = decodeGenome(explorer.current);
-    if (audio.running) {
-      lastAudioPush = lfoTime();
-      void audio.switchTo({ masterGain, fx: state.audio.fx, formulas: state.audio.formulas, mod: state.mod });
-    }
-    sim.reseed();
-    refreshUndo();
+    applyEffects(session.load(nowS(), '', JSON.stringify(s)));
     setStatus(`${label}: ${s.presetName ?? 'unnamed point'}`);
-    onSettled();
   }
 
   // Phones dim the screen while you watch: take a wake lock on the first
@@ -586,7 +509,7 @@ function boot(): void {
   surpriseBtn.addEventListener('click', surprise);
   undoBtn.addEventListener('click', undo);
   reseedBtn.addEventListener('click', () => {
-    sim.reseed();
+    reseed();
     flash(reseedBtn, '🌱 Reseeded');
   });
 
@@ -603,12 +526,11 @@ function boot(): void {
   // (PLAN.md decision 10).
   saveBtn.addEventListener('click', () => { void saveCurrentPoint(); });
   async function saveCurrentPoint(): Promise<void> {
-    const suggested = suggestPointName(presetName, namedPoints());
+    const suggested = suggestPointName(currentState().presetName, namedPoints());
     const name = await askText({ title: 'Name this point', value: suggested, ok: '💾 Save' });
     if (name === null) return;
     const s = currentState();
     s.presetName = name.trim() || suggested;
-    presetName = s.presetName;
     setStatus(`saving “${s.presetName}”…`);
     saveBtn.disabled = true;
     let id: string;
@@ -620,6 +542,8 @@ function boot(): void {
     } finally {
       saveBtn.disabled = false;
     }
+    // The point is the user's own named one now (and saved as the last point).
+    applyEffects(session.keptAs(s.presetName));
     // Re-read before writing: another tab may have saved points since this
     // one loaded, and writing our own list back would drop them.
     const result = saveLibrary(upsertPoint(loadLibrary(), { id, name: s.presetName }));
@@ -632,7 +556,6 @@ function boot(): void {
     setPointRef(`u:${library.findIndex((p) => p.name === s.presetName)}`);
     flash(saveBtn, '💾 Saved');
     setStatus(`saved as “${s.presetName}” — it's in the points list, under “My points”`);
-    onSettled();
   }
 
   // Another tab saved or deleted a point: show the same list here.
@@ -654,7 +577,7 @@ function boot(): void {
       history.replaceState(null, '', url);
       return { url, short: true };
     } catch {
-      return { url: `${cleanUrl(location.href)}#s=${encodeStateToken(s)}`, short: false };
+      return { url: `${cleanUrl(location.href)}#s=${encodeToken(s)}`, short: false };
     }
   }
 
@@ -690,7 +613,7 @@ function boot(): void {
   }
   detailsBtn.addEventListener('click', () => {
     details.hidden = !details.hidden;
-    if (!details.hidden) renderDetails(detailsBody, state, scout?.parent ?? null);
+    if (!details.hidden) renderDetails(detailsBody, state, scoutParentOf(session));
   });
   detailsCloseBtn.addEventListener('click', closeDetails);
 
@@ -721,6 +644,8 @@ function boot(): void {
   }, {
     onSound: pushSettingsSound,
     onVolume: (v) => {
+      // While Settings is open the sound plays the point being edited; the
+      // session takes the volume with that point when the page closes.
       masterGain = v;
       volume.value = String(v);
       audio.setMasterGain(v);
@@ -742,7 +667,7 @@ function boot(): void {
     soundEditTimer = null;
     soundEditAt = performance.now();
     if (!audio.running) return;
-    audio.applyState({ masterGain, fx: state.audio.fx, formulas: state.audio.formulas, mod: state.mod });
+    audio.applyState(state, masterGain);
     document.body.dataset.soundEdits = String(++soundEdits); // for scripts/smoke.mjs
   }
   function pushSettingsSound(): void {
@@ -753,16 +678,13 @@ function boot(): void {
 
   function openSettings(): void {
     if (settings.isOpen) return;
-    // A morph in flight lands now: the page edits the point it was heading to.
-    if (!morphDone) {
-      live = morphTo;
-      morphFrom = morphTo;
-      morphDone = true;
-      applyToEngines(decodeGenome(live), true);
-    }
-    stopScout(); // its candidates are about the point being edited away
+    // The session lands a morph in flight (the page edits the point it was
+    // heading to) and stops the scout (its candidates are about the point
+    // being edited away).
+    stopScout();
+    applyEffects(session.openSettings(nowS()));
     endStroke();
-    state = decodeGenome(explorer.current);
+    state = currentState();
     settings.open(state, masterGain, audio.running);
     document.body.dataset.settings = 'open';
   }
@@ -773,26 +695,18 @@ function boot(): void {
     settings.hide();
     delete document.body.dataset.settings;
     settingsBtn.focus();
-    const before = decodeGenome(explorer.current);
-    if (samePoint(state, before)) {
-      state = before;
-      onSettled(); // a morph landed by openSettings() is saved and scouted here
-    } else {
-      const prev = explorer.current;
-      explorer.edit(encodeGenome(state));
+    const before = currentState();
+    const edited = !samePoint(state, before);
+    // One undoable step and a jump, not a morph — the sound is already there;
+    // no change at all only settles what opening landed.
+    const point: AppState = { ...state, audio: { ...state.audio, masterGain } };
+    if (edited) {
       history.replaceState(null, '', cleanUrl(location.href));
-      stepCount++;
-      presetName = undefined;
       setPointRef('');
-      live = explorer.current;
-      morphFrom = live;
-      morphTo = live;
-      morphDone = true;
-      applyToEngines(decodeGenome(live), true);
-      refreshUndo();
-      setStatus(`${actionLabel('edit')} · step ${stepCount}\n${describeChange(prev, explorer.current)}`);
-      onSettled();
+    } else {
+      state = before;
     }
+    applyEffects(session.closeSettings(nowS(), JSON.stringify(point)));
     resumeLoop();
   }
 
@@ -821,7 +735,7 @@ function boot(): void {
     void iosUnlock.play().then((ok) => { document.body.dataset.iosUnlock = ok ? '1' : 'refused'; });
     soundBusy(true);
     try {
-      await audio.start({ masterGain, fx: state.audio.fx, formulas: state.audio.formulas, mod: state.mod });
+      await audio.start(state, masterGain);
     } catch (err) {
       setStatus(`audio failed: ${err instanceof Error ? err.message : String(err)}`);
       soundBusy(false);
@@ -829,25 +743,16 @@ function boot(): void {
     }
     soundBusy(false);
     showSound(true);
-    const analyser = audio.analyser;
-    if (analyser) {
-      timeDomain = new Float32Array(analyser.fftSize);
-      freqBins = new Uint8Array(analyser.frequencyBinCount);
-      tracker = new FeatureTracker(audio.sampleRate);
-    }
-    lastAudioPush = -1;
-    scheduleScout();
+    applyEffects(session.setPlaying(nowS(), true));
   }
 
   async function stopAudio(): Promise<void> {
     if (!audio.running) return;
     iosUnlock.stop();
     document.body.dataset.iosUnlock = '0';
-    clockOffset = performance.now() / 1000 - audio.time; // keep the LFO clock continuous
     stopScout();
+    applyEffects(session.setPlaying(nowS(), false));
     await audio.stop();
-    tracker = null;
-    features = { ...SILENT_FEATURES };
     showSound(false);
   }
 
@@ -858,7 +763,7 @@ function boot(): void {
 
   volume.addEventListener('input', () => {
     masterGain = Number(volume.value);
-    audio.setMasterGain(masterGain);
+    applyEffects(session.setMasterGain(nowS(), masterGain));
   });
 
   document.addEventListener('keydown', (e) => {
@@ -884,64 +789,58 @@ function boot(): void {
   });
 
   // --- the frame loop ----------------------------------------------------
-  function effectiveCards(t: number): Record<string, Record<string, number>> {
-    const out: Record<string, Record<string, number>> = {};
-    for (const card of CARDS) {
-      const cs = state.visual.cards[card.id];
-      out[card.id] = effectiveParams(card.id, cs.params, state.mod.lfos, state.mod.routes, VISUAL_RANGES[card.id], t);
-    }
-    return out;
-  }
+  // What each frame does is the core's (sim::driver, PLAN-CORE.md phase 5):
+  // the point through its LFOs and the sound's couplings, an onset hit
+  // heard → growth and a ripple, a finger → stamps along its stroke, the
+  // LFO clock (the sound's own while it plays, carried on when it stops),
+  // the noise's drift. This side hands it the heard frame and draws.
 
   // --- touch / click on the canvas (PLAN.md decision 14) -----------------
-  // A finger seeds the picture exactly the way a bell strike does: the same
-  // inject() disc and the same ripple as an onset hit. Sampled once per
-  // frame, not per pointermove — a move event can fire at 120 Hz and each
-  // stamp is a full-grid pass.
-  let painting = false;
-  let pointerUv: [number, number] = [0.5, 0.5];
-  let stampedAt: [number, number] | null = null;
+  // A finger seeds the picture exactly the way a bell strike does. The
+  // driver lays the stamps once per frame, not per pointermove — a move event
+  // can fire at 120 Hz and each stamp is a full-grid pass.
   let touchSeeds = 0;
-
-  function paintStroke(): void {
-    if (!painting) return;
-    const points = stampedAt
-      ? strokePoints(stampedAt, pointerUv, TOUCH_SPACING, sim.aspect, TOUCH_MAX_STAMPS)
-      : [pointerUv];
-    for (const p of points) sim.inject(p, TOUCH_RADIUS, TOUCH_AMOUNT);
-    stampedAt = [pointerUv[0], pointerUv[1]];
-    touchSeeds += points.length;
-    document.body.dataset.touchSeeds = String(touchSeeds);
-  }
-
   canvas.addEventListener('pointerdown', (e) => {
-    painting = true;
-    stampedAt = null; // a press stamps exactly where it landed, with no trail
-    pointerUv = canvasUv(canvas.getBoundingClientRect(), e.clientX, e.clientY);
-    ripples.add(pointerUv[0], pointerUv[1], TOUCH_AMOUNT, performance.now() / 1000);
+    const [x, y] = canvasUv(canvas.getBoundingClientRect(), e.clientX, e.clientY);
+    pic.pointerDown(x, y, nowS());
     canvas.setPointerCapture(e.pointerId);
     e.preventDefault(); // no text selection, no scroll-from-canvas on a phone
   });
   canvas.addEventListener('pointermove', (e) => {
-    if (painting) pointerUv = canvasUv(canvas.getBoundingClientRect(), e.clientX, e.clientY);
+    if (!pic.painting()) return;
+    const [x, y] = canvasUv(canvas.getBoundingClientRect(), e.clientX, e.clientY);
+    pic.pointerMoved(x, y);
   });
-  const endStroke = (): void => {
-    painting = false;
-    stampedAt = null;
-  };
+  const endStroke = (): void => pic.pointerUp();
   canvas.addEventListener('pointerup', endStroke);
   canvas.addEventListener('pointercancel', endStroke);
 
-  // Onset hit → fresh growth at a random spot + a ripple from it
-  // (onsetToSeed, PLAN.md decision 8).
-  function seedOnHit(now: number): void {
-    const amount = state.coupling.onsetToSeed;
-    if (amount < 0.02) return;
-    const x = 0.08 + Math.random() * 0.84;
-    const y = 0.08 + Math.random() * 0.84;
-    sim.inject([x, y], 0.015 + 0.035 * amount, Math.min(1, 0.4 + amount));
-    ripples.add(x, y, amount, now);
-    document.body.dataset.fxHits = String(++fxHits);
+  /** The point the driver draws: handed over whenever `state` is replaced
+   *  (an effect, a morph step, Settings closing). */
+  let pictureOf: AppState | null = null;
+  function syncPicturePoint(force = false): void {
+    if (!force && pictureOf === state) return;
+    pictureOf = state;
+    pic.setPoint(JSON.stringify(state));
+  }
+
+  let heardHits = -1;
+  const sound = new Float64Array(9);
+  /** [time, loudness, swell, brightness, onset, low, mid, high, hits] of
+   *  the frame being heard, or nothing when no sound plays. */
+  function heardSound(): Float64Array {
+    const f = audio.running ? audio.heard() : null;
+    if (!f) return new Float64Array(0);
+    sound.set([
+      f[FRAME.time], f[FRAME.loudness], f[FRAME.swell], f[FRAME.brightness], f[FRAME.onset],
+      f[FRAME.low], f[FRAME.mid], f[FRAME.high], f[FRAME.hits],
+    ]);
+    // for scripts/smoke.mjs: onset hits that reached the picture
+    if (heardHits >= 0 && f[FRAME.hits] > heardHits && state.coupling.onsetToSeed >= 0.02) {
+      document.body.dataset.fxHits = String(++fxHits);
+    }
+    heardHits = f[FRAME.hits];
+    return sound;
   }
 
   function trackExposure(exposure: number, now: number): void {
@@ -970,48 +869,31 @@ function boot(): void {
       document.body.dataset.loop = 'paused';
       return;
     }
-    tickMorph();
     const now = performance.now() / 1000;
     const since = lastFrame > 0 ? now - lastFrame : 0;
-    const dt = lastFrame > 0 ? Math.min(0.25, since) : 1 / 60;
     // the first frame after a start or a pause has no interval to measure
     if (lastFrame > 0) tune(since * 1000);
     lastFrame = now;
 
-    const analyser = audio.analyser;
-    if (analyser && tracker) {
-      analyser.getFloatTimeDomainData(timeDomain);
-      analyser.getByteFrequencyData(freqBins);
-      features = tracker.update(timeDomain, freqBins, dt);
-      if (onsets.update(features.onset, now)) seedOnHit(now);
-    }
-
-    paintStroke();
-    const t = lfoTime();
-    const eff = applyCoupling(effectiveCards(t), features, state.coupling);
-    sim.reaction = reactionParamsFromCard(eff.reaction);
-    sim.fieldVariation = state.visual.cards.fieldVariation.on ? fieldVariationParamsFromCard(eff.fieldVariation) : { ...ZERO_FIELD_VARIATION };
-    sim.flow = state.visual.cards.flow.on ? flowParamsFromCard(eff.flow) : { ...ZERO_FLOW };
-    const pal = eff.palette;
-    sim.step();
-    const fx = displayCoupling(features, state.coupling);
-    trackExposure(fx.exposure, now);
-    sim.render(
-      composePalette(palettesByIndex(pal.paletteId), pal.shift, pal.contrast, pal.bands, pal.relief, pal.lightAngle, pal.gloss),
-      fx,
-      ripples.pack(now),
-    );
+    syncPicturePoint();
+    const painting = pic.painting();
+    const f = parseFrame(pic.frame(now, heardSound(), sim.aspect));
+    if (painting && f.injects.length > 0) document.body.dataset.touchSeeds = String(touchSeeds += f.injects.length);
+    sim.step(f);
+    trackExposure(f.display.exposure, now);
+    sim.render(f);
     // While the probe is choosing: make the next frame interval mean "this
     // frame was drawn", not "this frame was queued". Never after that — it
     // costs a swap-chain resolve every frame.
-    if (probe && !probe.done) sim.syncFrame();
+    if (MEASURE && !pic.probeDone()) sim.syncFrame();
     requestAnimationFrame(loop);
   }
 
   // --- boot ----------------------------------------------------------------
   setPointRef('');
   // What to open: ?presetId= (cloud) > #s= (old long links) > ?preset=N >
-  // the last point (localStorage) > the default preset. See state/launch.ts.
+  // the last point (localStorage) > the default preset (the core's parse_launch;
+  // a #s= token that does not decode reads as no link at all).
   function openFallback(url: string): void {
     const last = loadLastPoint();
     if (last) {
@@ -1019,7 +901,7 @@ function boot(): void {
       return;
     }
     const p = PRESETS[DEFAULT_PRESET_INDEX];
-    loadState(cloneAppState(p.state), 'loaded', url);
+    loadState(structuredClone(p.state), 'loaded', url);
     setPointRef(`b:${DEFAULT_PRESET_INDEX}`);
   }
 
@@ -1029,16 +911,14 @@ function boot(): void {
     openFallback(location.href); // something to look at while the point loads
     setStatus(`opening shared point ${id}…`);
     void fetchPoint(id, { api }).then((p) => {
-      if (p) loadState(stateToAppState(p), 'opened link', withPresetId(location.href, id));
+      if (p) loadState(p, 'opened link', withPresetId(location.href, id));
       else setStatus(`couldn't open shared point ${id} (offline, or the link is wrong)`);
       document.body.dataset.launched = '1';
     });
-  } else if (launch.kind === 'token') {
-    const shared = decodeStateToken(launch.token);
-    if (shared) loadState(stateToAppState(shared), 'opened link');
-    else openFallback(cleanUrl(location.href));
+  } else if (launch.kind === 'point') {
+    loadState(launch.point, 'opened link');
   } else if (launch.kind === 'preset' && PRESETS[launch.index]) {
-    loadState(cloneAppState(PRESETS[launch.index].state), 'loaded');
+    loadState(structuredClone(PRESETS[launch.index].state), 'loaded');
     setPointRef(`b:${launch.index}`);
   } else {
     openFallback(cleanUrl(location.href));
@@ -1072,4 +952,4 @@ function boot(): void {
   document.body.dataset.ready = '1'; // readiness signal for scripts/*.mjs
 }
 
-boot();
+void boot();

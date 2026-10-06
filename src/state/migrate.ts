@@ -5,7 +5,7 @@
 // point to the points database and rewrites the list — which must not lose
 // anything, including when the browser refuses to write, so every step is
 // injectable and covered by tests/migrate.test.ts.
-import type { AppState } from './schema';
+import type { AppState } from './types';
 import type { SavedPoint } from './library';
 import { upsertPoint } from './library';
 import type { UserPreset } from './userPresets';
