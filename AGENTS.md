@@ -36,28 +36,18 @@ npm run snap -- --out shots/x.png [--preset N] [--sound] [--like N] [--dislike N
                   [--settings audio|video] [--scroll px]  # ⚙ Settings, pane scrolled
                   [--reseed] [--stroke x0,y0,x1,y1]  # drag on a clean field:
                   #   the only way to see what a touch actually painted
-npm run analyze   # fractality of the real sound (see "Sound analysis" below);
-                  # --onsets: onset hits per preset at 60/30/15 fps (the
-                  #   picture seeds growth on every hit — tune the detector here);
-                  # --switch 0,3,10 --at 12: clicks at preset switches;
-                  # --configs 30@22050,24@8000: does a cheap render rank like
-                  #   an expensive one (Spearman ρ)?;
-                  # --render [--grid 1024,256] [--scale 0,1280] [--size WxH]:
+npm run analyze -- --render [--grid 1024,256] [--scale 0,1280] [--size WxH]
                   #   FPS of the real rAF loop per configuration (--grid 0 =
                   #   let the boot probe choose, and see what it chose);
                   # --render --passes: ms per PASS — a 1-px readPixels is a
                   #   real barrier where gl.finish() is not, and timing step()
-                  #   at speed 1 vs 11 splits one react substep from the rest
-                  # --repeat N: mean ± sd over N seeded rooms (seeds 1..N,
-                  #   the same rooms for every point — renders are repeatable);
-                  # --png DIR: a log-frequency waterfall + loudness PNG per
-                  #   render — look at the sound;
+                  #   at 1 vs 11 substeps splits one react substep from the rest;
                   # --picture [--minutes 5 --every 30]: numbers for the
                   #   PICTURE per preset (coverage, edges, change; flags a
-                  #   pattern that died or froze), read from the sim state;
-                  # --character [--ref 0,3,5,6,8]: what KIND of sound
-                  #   (dropout, swing, low end, harmonicity, roughness,
-                  #   motion at 1 s / 10 s) and the distance to a group
+                  #   pattern that died or froze), read from the sim state.
+                  # The SOUND is measured by synesthesia-core's syn-bench
+                  #   (fractality, --onsets, --switch, --configs, --repeat,
+                  #   --character/--ref, --wav, --png): PLAN-CORE.md C6
 npm run build     # core + tsc + vite build into ./dist; CI (.github/workflows/pages.yml)
                   # builds and publishes it to GitHub Pages — nothing built is committed
 npm run check:cloud   # cloud/ Worker: tsc + Miniflare tests (npm install in cloud/ once)
@@ -71,11 +61,11 @@ own; a server you start by hand (`npm run dev`, a snapshot's vite), you stop
 before the session ends — `pgrep -af '[b]in/vite'` must print nothing.
 Agreed decisions go into PLAN.md (numbered, dated) — the user asks for that.
 
-Three skills carry the routines: **`verify`** (which checks to run before a
-commit and how to read their failures), **`sound-check`** (how to measure
-the actual sound and tune thresholds on real renders) and **`new-preset`**
-(designing or retuning a preset: profile, variants, same-room comparisons,
-the picture over minutes, listening WAVs for the user).
+The **`verify`** skill carries the routine here (which checks to run before
+a commit and how to read their failures). Measuring the sound
+(**`sound-check`**) and making or retuning a preset (**`new-preset`**) are
+synesthesia-core's skills now — the sound and the presets live there
+(PLAN-CORE.md C2, C6).
 
 ## How work is done here — measure first
 
@@ -386,6 +376,10 @@ scripts/analyze.mjs    offline render in the page (?paused=1, imports /src/*.ts
 ```
 
 ## Sound analysis — what the numbers mean
+
+(The bench that prints these is synesthesia-core's `syn-bench` now, and
+its `sound-check` skill holds the current table; the history below is how
+the numbers were found, on the browser's graph.)
 
 `envβ`/`cenβ`: β of 1/f^β fitted on 0.05–5 Hz fluctuations of the loudness
 (dB) / spectral-centroid (octaves) contours; contours flatter than 0.5 dB /

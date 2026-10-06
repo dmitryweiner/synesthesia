@@ -2,7 +2,7 @@
 
 *Status: decisions agreed with the user on 2026-10-05; phase 0 built on
 branch `core` (2026-10-05); phase 0 done (the Android gate passed after C12, cheaper generators in
-the core); phases 0–3 done; phases 0–7 done; phase 8 next.*
+the core); phases 0–3 done; phases 0–8 done; phase 9 (listening pass, the swap) next.*
 
 The web app was the first home of Synesthesia and is still the
 specification: [synesthesia-core](../synesthesia-core/) dumps its presets,
@@ -214,7 +214,7 @@ table updated.
 | 5 | Picture | done |
 | 6 | Settings, details, points, links | done |
 | 7 | Points Worker on wasm | done (deploy waits for the swap) |
-| 8 | Tooling, CI, docs | — |
+| 8 | Tooling, CI, docs | done (module map rewritten at the swap) |
 | 9 | Listening pass and the swap | — |
 | 10 | After: `preset_name` (C11) | — |
 
@@ -606,6 +606,33 @@ it. The real deploy waits for the swap (phase 9), by the user's go.
 - AGENTS.md module map, README, PLAN.md "Architecture", the `verify` skill
   rewritten; `sound-check` and `new-preset` move to the core.
 
+**Done (2026-10-06, core `25b8eb4`)**, but for what only the swap can do:
+- `syn-bench` (core): the sound modes of `analyze.mjs` — fractality,
+  `--repeat`, `--mutants`/`--random`/`--token`/`--points` (drafts),
+  `--character`/`--ref`, `--wav`, `--png` (log waterfall + loudness),
+  `--onsets`, `--switch`, `--configs`. Points render in parallel. The FDN
+  reverb has no seeded room, so `--repeat` varies only the noise seeds.
+  The first waterfall of Bell spots showed what the onset numbers meant:
+  every strike is followed by the delay's echoes, which the engine counts.
+- `analyze.mjs` keeps `--render`, `--render --passes`, `--picture`; the
+  sound flags print where they went.
+- CI: `.github/workflows/pages.yml` — the pinned core built from its
+  repository (Rust, wasm32, wasm-pack), `npm run check`, the Worker's
+  checks, the smoke (informative until a hosted run shows a running audio
+  clock), the build into `dist/`, and on main the Pages deploy. `docs/`
+  left git. **At the swap the repository's Pages source must switch to
+  "GitHub Actions"** (settings), or the site keeps serving the old docs/.
+- Skills: `sound-check` and `new-preset` live in the core (syn-bench,
+  `assets/presets.json`, drafts as `--points`), `bands.mjs` with them;
+  `verify` here is rewritten for the core branch.
+- **Preview before the swap (the open question):** `npm run bench:serve`
+  — the branch served over self-signed HTTPS on the LAN — is what the user
+  has used for every phone check of phases 0–5; it stays the way. No
+  second host.
+- Left for the swap: the AGENTS.md module map and README/PLAN.md
+  "Architecture" describe the TypeScript model until it is deleted; they
+  are rewritten in the same merge.
+
 ### 9. Listening pass and the swap
 
 - The user listens to all 15 presets on the branch (desktop, Android
@@ -619,9 +646,6 @@ it. The real deploy waits for the swap (phase 9), by the user's go.
 
 The core's TODO item, done once in the core.
 
-## Open questions (to decide when the phase comes)
+## Open questions
 
-- How the user previews the `core` branch on a phone before the swap
-  (C7): GitHub Pages serves one site. Options: a CI artifact served
-  locally, or a separate preview host — decide in phase 8, before phase 9.
-- The scout's render configuration (phase 4, by measurement).
+None left: the preview (phase 8) and the scout's render (phase 4) are decided above.
