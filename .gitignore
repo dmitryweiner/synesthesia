@@ -13,3 +13,5 @@ PROMT.md
 # the core's wasm package, built from the pinned revision (scripts/build-core.mjs)
 src/core/pkg/
 .core/
+# the core's wasm, copied in for the points Worker (cloud/package.json "wasm")
+cloud/src/syn_wasm_bg.wasm

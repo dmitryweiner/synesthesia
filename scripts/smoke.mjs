@@ -39,6 +39,9 @@ function samePoint(a, b) {
 
 const errors = [];
 let ctxLabel = 'boot';
+// SMOKE_VERBOSE=1: say which step is running every 30 s — a step that
+// waits on a stalled audio device can otherwise hang without a word.
+if (process.env.SMOKE_VERBOSE) setInterval(() => console.log(`… ${ctxLabel}`), 30000).unref();
 const browser = await launchBrowser();
 const context = await browser.newContext({
   viewport: flags.has('mobile') ? { width: 390, height: 844 } : { width: 1280, height: 820 },

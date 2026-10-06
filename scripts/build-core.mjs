@@ -38,6 +38,9 @@ function build(coreDir, stamp, targetDir) {
   run('wasm-pack', ['build', 'syn-wasm', '--target', 'web', '--release', '--no-pack', '--out-dir', OUT], coreDir);
   // the picture's shaders travel with the package (PLAN-CORE.md C10)
   cpSync(join(coreDir, 'shaders'), join(OUT, 'shaders'), { recursive: true });
+  // the points the TypeScript froze, ids included: the points Worker's tests
+  // check that the Worker on wasm still gives every one of them its id (C5)
+  cpSync(join(coreDir, 'fixtures', 'points.json'), join(OUT, 'fixtures', 'points.json'));
   writeFileSync(STAMP, `${stamp}\n`);
   console.log(`syn-wasm ${stamp} → src/core/pkg`);
 }

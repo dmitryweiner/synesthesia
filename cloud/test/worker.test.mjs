@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 
 const ORIGIN = 'https://dmitryweiner.github.io';
@@ -22,10 +23,12 @@ function post(body, headers = {}) {
 }
 
 before(async () => {
-  const script = await readFile(new URL('../dist/index.js', import.meta.url), 'utf8');
   mf = new Miniflare(convertV4MiniflareOptions({
-    modules: true,
-    script,
+    // the bundle, and the core's wasm it imports (PLAN-CORE.md C5)
+    modules: [
+      { type: 'ESModule', path: fileURLToPath(new URL('../dist/index.js', import.meta.url)) },
+      { type: 'CompiledWasm', path: fileURLToPath(new URL('../dist/syn_wasm_bg.wasm', import.meta.url)) },
+    ],
     compatibilityDate: '2026-09-01',
     bindings: { ALLOWED_ORIGINS: `${ORIGIN} http://localhost:5173` },
     d1Databases: ['DB'],
@@ -125,4 +128,23 @@ test('daily quota blocks new points but never re-shares of existing ones', async
   assert.equal(again.status, 200);
   assert.equal((await again.json()).id, id);
   await db.prepare('DELETE FROM daily').run();
+});
+
+// Every point the TypeScript froze into the core's fixture — presets, random
+// genomes, mutated and broken JSON, old shapes, and the production D1's —
+// gets the very id it got before, through the Worker on wasm (C5).
+test('the core in the Worker gives every frozen point its id', async () => {
+  const fixture = JSON.parse(await readFile(new URL('../../src/core/pkg/fixtures/points.json', import.meta.url), 'utf8'));
+  let checked = 0;
+  for (const c of fixture.cases) {
+    const res = await post(JSON.stringify(c.input)); // as JSON, even a bare string
+    if (c.id === null) {
+      assert.equal(res.status, 422, `${c.kind}: ${JSON.stringify(c.input).slice(0, 60)}`);
+      continue;
+    }
+    assert.ok(res.status === 200 || res.status === 201, `${c.kind}: ${res.status} ${await res.clone().text()}`);
+    assert.equal((await res.json()).id, c.id, c.kind);
+    checked++;
+  }
+  assert.ok(checked > 250, `${checked} points checked`);
 });

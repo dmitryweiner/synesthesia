@@ -2,7 +2,7 @@
 
 *Status: decisions agreed with the user on 2026-10-05; phase 0 built on
 branch `core` (2026-10-05); phase 0 done (the Android gate passed after C12, cheaper generators in
-the core); phases 0–3 done; phases 0–6 done; phase 7 next.*
+the core); phases 0–3 done; phases 0–7 done; phase 8 next.*
 
 The web app was the first home of Synesthesia and is still the
 specification: [synesthesia-core](../synesthesia-core/) dumps its presets,
@@ -213,7 +213,7 @@ table updated.
 | 4 | Session and scout | done: the scout renders 24 s @ 11 kHz |
 | 5 | Picture | done |
 | 6 | Settings, details, points, links | done |
-| 7 | Points Worker on wasm | — |
+| 7 | Points Worker on wasm | done (deploy waits for the swap) |
 | 8 | Tooling, CI, docs | — |
 | 9 | Listening pass and the swap | — |
 | 10 | After: `preset_name` (C11) | — |
@@ -580,6 +580,22 @@ probe). `SimEngine` now only draws: `step(frame)`, `render(frame)`,
   is too large, a `state`-only build feature of `syn-wasm`).
 - Miniflare tests: the fixture of real points gets the same ids as before.
 - Deploy only after the swap (phase 9), by the user's go.
+
+**Done (2026-10-06, core `9861b93`).** `cloud/src/index.ts` validates with
+the core: `sanitizePoint` (the canonical JSON of what a body sanitizes to)
+and `pointId`, from syn-wasm; `cloud/` no longer imports `src/state/*`. The
+`.wasm` is imported as a module (wrangler's CompiledWasm rule; the tests'
+Miniflare gets it in its module list; `npm run wasm` copies it from the
+pinned package, never committed). The Miniflare test posts **every case of
+the core's `fixtures/points.json`** through the Worker — presets, random
+genomes, mutated and broken JSON, old shapes, the 20 production points —
+and each gets the id the TypeScript gave it (non-points: 422). Size: the
+bundle 31 KB + the wasm 1.34 MB, 384 KB gzipped together — far under the
+3 MB limit, so no `state`-only build. `wrangler deploy --dry-run` bundles
+it. The real deploy waits for the swap (phase 9), by the user's go.
+- Noted for phase 8: the wasm has grown from 650 KB to 1.34 MB (≈370 KB
+  gzipped) as the session, the picture and the settings joined it; that
+  is also the page's first load.
 
 ### 8. Tooling, CI, docs
 
