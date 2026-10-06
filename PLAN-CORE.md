@@ -618,10 +618,11 @@ it. The real deploy waits for the swap (phase 9), by the user's go.
   sound flags print where they went.
 - CI: `.github/workflows/pages.yml` — the pinned core built from its
   repository (Rust, wasm32, wasm-pack), `npm run check`, the Worker's
-  checks, the smoke (informative until a hosted run shows a running audio
-  clock), the build into `dist/`, and on main the Pages deploy. `docs/`
-  left git. **At the swap the repository's Pages source must switch to
-  "GitHub Actions"** (settings), or the site keeps serving the old docs/.
+  checks, the smoke (blocking: the first hosted run, 2026-10-06, passed
+  all of it, the sound → picture steps included), the build into `dist/`,
+  and on main the Pages deploy. The user switched Pages to "GitHub
+  Actions" on 2026-10-06. `docs/`
+  left git.
 - Skills: `sound-check` and `new-preset` live in the core (syn-bench,
   `assets/presets.json`, drafts as `--points`), `bands.mjs` with them;
   `verify` here is rewritten for the core branch.

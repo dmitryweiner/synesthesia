@@ -40,11 +40,9 @@ jobs:
       - run: cd cloud && npm ci
       - run: npm run check:cloud
       - run: npx playwright install --with-deps chromium
-      # The smoke needs a running audio clock in headless Chromium; until a
-      # run on the hosted runner shows it has one, it informs and does not
-      # block (its sound checks are the ones that would fail without).
+      # Blocking: the hosted runner's headless Chromium has a running audio
+      # clock (the first run, 2026-10-06, passed the sound → picture checks).
       - run: npm run smoke
-        continue-on-error: true
       - run: npm run build
       - uses: actions/upload-pages-artifact@v3
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
