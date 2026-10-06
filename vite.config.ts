@@ -10,7 +10,7 @@ export default defineConfig({
   // (a phone can keep a tab open on an old one for days).
   define: { __BUILD__: JSON.stringify(new Date().toISOString().slice(0, 16).replace('T', ' ')) },
   build: {
-    outDir: 'docs',
+    outDir: 'dist', // published by .github/workflows/pages.yml, never committed (C9)
     emptyOutDir: true,
     // core-bench.html: PLAN-CORE.md phase 0's gate, opened on phones too
     rollupOptions: { input: { main: 'index.html', coreBench: 'core-bench.html' } },

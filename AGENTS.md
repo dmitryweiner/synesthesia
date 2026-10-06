@@ -58,7 +58,8 @@ npm run analyze   # fractality of the real sound (see "Sound analysis" below);
                   # --character [--ref 0,3,5,6,8]: what KIND of sound
                   #   (dropout, swing, low end, harmonicity, roughness,
                   #   motion at 1 s / 10 s) and the distance to a group
-npm run build     # tsc + vite build into ./docs (GitHub Pages) — commit docs/
+npm run build     # core + tsc + vite build into ./dist; CI (.github/workflows/pages.yml)
+                  # builds and publishes it to GitHub Pages — nothing built is committed
 npm run check:cloud   # cloud/ Worker: tsc + Miniflare tests (npm install in cloud/ once)
 npm run deploy:cloud  # D1 migrations --remote + wrangler deploy (wrangler is authorized)
 ```

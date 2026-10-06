@@ -1,0 +1,66 @@
+# Checks the app and publishes it to GitHub Pages (PLAN-CORE.md C9): the
+# core's wasm is built here from the revision pinned in package.json, never
+# committed, and neither is the site (docs/ left git with the move onto the
+# core). Every push runs the checks; a push to main also deploys.
+# Pages must be set to "Source: GitHub Actions" in the repository settings.
+name: pages
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-directories: .core/target
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+      - run: npm ci
+      # builds the pinned core into src/core/pkg first (scripts/build-core.mjs)
+      - run: npm run check
+      - run: cd cloud && npm ci
+      - run: npm run check:cloud
+      - run: npx playwright install --with-deps chromium
+      # The smoke needs a running audio clock in headless Chromium; until a
+      # run on the hosted runner shows it has one, it informs and does not
+      # block (its sound checks are the ones that would fail without).
+      - run: npm run smoke
+        continue-on-error: true
+      - run: npm run build
+      - uses: actions/upload-pages-artifact@v3
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        with:
+          path: dist
+
+  deploy:
+    needs: check
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

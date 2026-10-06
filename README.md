@@ -4,7 +4,7 @@ Sound and image generated together from one point in a large parameter
 space, and steered by you. Press 👍 when you like where it's going, 👎 when
 you don't, and the search follows.
 
-**Live:** GitHub Pages build in [`docs/`](docs/).
+**Live:** GitHub Pages, built and published by CI ([`.github/workflows/pages.yml`](.github/workflows/pages.yml)).
 
 ## How it works
 
