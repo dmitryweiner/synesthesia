@@ -275,6 +275,19 @@ ctxLabel = 'settings';
   const capped = await boxes.evaluateAll((els) => ({ on: els.filter((e) => e.checked).length, blocked: els.filter((e) => !e.checked && e.disabled).length, free: els.filter((e) => !e.checked && !e.disabled).length }));
   check(capped.on === 5 && capped.free === 0 && capped.blocked === total - 5, `the 5-formula cap: ${JSON.stringify(capped)}`);
 
+  // Layers: a pattern that does not parse is shown, not applied; one that does is heard
+  const layer = page.locator('#setL_3_on');
+  if (!(await layer.isChecked())) await layer.check();
+  const pat = page.locator('#setL_3_pattern');
+  const edits1 = await soundEdits();
+  await pat.fill('[0 1');
+  check(await pat.evaluate((n) => n.classList.contains('invalid')), 'a pattern that does not parse should be marked');
+  check(((await page.locator('#setL_3 .ctrl-error').textContent()) ?? '').includes('unclosed'), 'and say why');
+  await pat.fill('0 ~ [0 0] ~');
+  check(!(await pat.evaluate((n) => n.classList.contains('invalid'))), 'a pattern that parses should be taken');
+  await page.waitForTimeout(200);
+  check((await soundEdits()) > edits1, 'a layer edit did not reach the engine');
+
   // Video: the other tab; picture changes wait for the close
   await page.locator('#tabVideo').click();
   check(await page.locator('#paneVideo').isVisible() && await page.locator('#paneAudio').isHidden(), 'the Video tab did not switch the pane');

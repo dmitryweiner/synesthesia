@@ -3,18 +3,18 @@
 // whose tests hold the guarantee that everything the page lets you set
 // survives the genome); what stays here is the page's own presentation —
 // how a slider maps to a value and how a value reads.
-import type { ModRoute } from '../state/types';
+import type { AppState, ModRoute, SeqLayer } from '../state/types';
 import type { FxState } from '../state/types';
 import type { ChorusMode, FilterType } from '../state/types';
 import { coreSchema } from '../core/settings';
 import {
   pageModel, type Domain, type PageControl, type PageCoupling, type PageFilterControls, type PageFxModule,
-  type PageScale, type PageTargetGroup,
+  type PageLayers, type PageScale, type PageTargetGroup,
 } from '../core/settings';
 
 export {
-  applyFxPreset, canAddRoute, canEnableFormula, coreSchema, fxPresets, isTargetOn, modulatedKeys, newRoute,
-  routeDomain, samePoint, targetExp, vowelLabel,
+  applyFxPreset, canAddRoute, canEnableFormula, checkPattern, coreSchema, fxPresets, isTargetOn, modulatedKeys,
+  newRoute, routeDomain, samePoint, targetExp, vowelLabel,
 } from '../core/settings';
 export type { Domain, FxPreset } from '../core/settings';
 export type { ModRoute };
@@ -141,3 +141,36 @@ export function setFxFlag(fx: FxState, k: string, on: boolean): void {
 export function couplingValue(c: Readonly<Record<string, number>>, k: string): number {
   return c[k] ?? 0;
 }
+
+// ---------------------------------------------------------------------------
+// The sample and drum layers
+
+/** A layer slot nobody has used: off, at the core's defaults. */
+export function emptyLayer(): SeqLayer {
+  return { on: false, sound: '', pattern: '', gain: 0.5, speed: 1, density: 1, dry: false, mode: 'hits' };
+}
+
+/** Layer `i` as it is, without touching the point: a point with no `seq`
+ *  must stay without one until something is set (closing the page on an
+ *  untouched point is not an edit). */
+export function layerOf(s: Readonly<Pick<AppState, 'seq'>>, i: number): SeqLayer {
+  return s.seq?.layers[i] ?? emptyLayer();
+}
+
+/** Layer `i`, made writable: the section and the slot are created first. */
+export function writableLayer(s: Pick<AppState, 'seq'>, i: number): SeqLayer {
+  s.seq ??= { cps: 0.5, layers: [] };
+  while (s.seq.layers.length <= i) s.seq.layers.push(emptyLayer());
+  return s.seq.layers[i];
+}
+
+/** `owl:2` → `owl`. */
+export const soundName = (sound: string): string => sound.replace(/:\d+$/, '');
+
+/** What the catalogue says a sound was cut for: a bed, or hits. */
+export function soundMode(name: string): SeqLayer['mode'] {
+  return coreSchema().seqSounds.find((x) => x.name === name)?.mode ?? 'hits';
+}
+
+/** The tempo and each layer's sliders, from the core. */
+export const layersPage = (): PageLayers => pageModel().layers;

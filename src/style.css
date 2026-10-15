@@ -851,6 +851,36 @@ body {
   white-space: nowrap;
 }
 
+/* a layer's pattern: mini-notation, so monospace; what is wrong, under it */
+.ctrl.ctrl-text input[type='text'] {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  box-sizing: border-box;
+  padding: 0 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid #30363d;
+  border-radius: 6px;
+}
+
+.ctrl.ctrl-text input.invalid {
+  border-color: var(--dislike);
+  outline-color: var(--dislike);
+}
+
+.ctrl-error {
+  grid-column: 2;
+  color: var(--dislike);
+  font-size: 11px;
+}
+
+.ctrl-error:empty {
+  display: none;
+}
+
 /* a slider an LFO is moving right now */
 .ctrl.modulated label::after {
   content: ' ∿';

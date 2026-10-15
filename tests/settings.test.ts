@@ -62,3 +62,17 @@ describe('formatValue', () => {
   });
 });
 
+
+describe('the layers on the page', () => {
+  it('reading a layer leaves a point without layers as it was; writing one makes the slot', async () => {
+    const { emptyLayer, layerOf, soundName, writableLayer } = await import('../src/ui/settingsModel');
+    const point: Pick<import('../src/state/types').AppState, 'seq'> = {};
+    expect(layerOf(point, 2)).toEqual(emptyLayer());
+    expect('seq' in point).toBe(false);
+    writableLayer(point, 2).on = true;
+    expect(point.seq?.layers.map((l) => l.on)).toEqual([false, false, true]);
+    expect(point.seq?.cps).toBe(0.5);
+    expect(soundName('owl:12')).toBe('owl');
+    expect(soundName('great-tit')).toBe('great-tit');
+  });
+});

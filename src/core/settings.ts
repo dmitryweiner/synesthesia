@@ -7,9 +7,10 @@ import {
   applyFxPreset as coreApplyFxPreset, canAddRoute as coreCanAddRoute, canEnableFormula as coreCanEnableFormula,
   fxPresetsJson, isTargetOn as coreIsTargetOn, modulatedKeys as coreModulatedKeys, newRoute as coreNewRoute,
   routeDomain as coreRouteDomain, samePoint as coreSamePoint, schemaJson, settingsPageJson,
+  checkPattern as coreCheckPattern,
   targetExp as coreTargetExp, vowelLabel as coreVowelLabel,
 } from './pkg/syn_wasm.js';
-import type { CardDef, FormulaDef, FxState, ModRoute } from '../state/types';
+import type { CardDef, FormulaDef, FxState, ModRoute, SeqLayer } from '../state/types';
 import type { AppState } from '../state/types';
 
 export interface PageControl { k: string; name: string; min: number; max: number; step: number; exp?: boolean }
@@ -20,7 +21,18 @@ export interface PageCoupling extends PageControl { kind: 'offset' | 'effect' }
 export interface PageScale { min: number; max: number; exp?: boolean; step?: number; k?: string; name?: string }
 export interface PageTargetGroup { id: string; title: string; params: { k: string; name: string; exp: boolean }[] }
 
+/** The sample and drum layers on the page: tempo, each layer's sliders, how
+ *  it plays, its sounds in groups. */
+export interface PageLayers {
+  tempo: PageControl;
+  sliders: PageControl[];
+  modes: { value: SeqLayer['mode']; label: string }[];
+  soundGroups: { group: string; names: string[] }[];
+  customRhythm: string;
+}
+
 export interface SettingsPageModel {
+  layers: PageLayers;
   fxModules: PageFxModule[];
   filterControls: Record<string, PageFilterControls>;
   vowels: string[];
@@ -46,6 +58,13 @@ export interface CoreSchema {
   chorusModes: string[];
   fxOnKeys: string[];
   fxModParams: string[];
+  /** The sounds a layer can pick (and what each was cut for), the built-in
+   *  rhythms (0, "", is a point's own), the layer count, what they are. */
+  seqSounds: { name: string; mode: SeqLayer['mode'] }[];
+  seqRhythms: string[];
+  seqLayers: number;
+  seqDescription: string;
+  seqLayerDescription: string;
 }
 
 export interface FxPreset { name: string; group: string; fx: Partial<FxState> }
@@ -90,6 +109,8 @@ export const isTargetOn = (s: Readonly<AppState>, target: string): boolean => co
 export const canAddRoute = (s: Readonly<AppState>): boolean => coreCanAddRoute(json(s));
 export const targetExp = (target: string, param: string): boolean => coreTargetExp(target, param);
 export const vowelLabel = (v: number): string => coreVowelLabel(v);
+/** "" when a layer's pattern parses, else what is wrong and where. */
+export const checkPattern = (pattern: string): string => coreCheckPattern(pattern);
 export const samePoint = (a: Readonly<AppState>, b: Readonly<AppState>): boolean => coreSamePoint(json(a), json(b));
 
 export type Domain = 'sound' | 'picture';

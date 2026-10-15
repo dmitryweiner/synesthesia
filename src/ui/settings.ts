@@ -16,9 +16,11 @@ import { card, fillSelect, selectRow, sliderRow } from './controls';
 import type { Card } from './controls';
 import { ModPanel } from './modPanel';
 import {
-  applyFxPreset, canEnableFormula, coreSchema, couplingControls, couplingValue, filterControls, fxCards,
-  fxChoiceValue, fxFlag, fxNumber, fxPresets, modulatedKeys, setFxChoice, setFxFlag, setFxNumber, vowelLabel,
+  applyFxPreset, canEnableFormula, checkPattern, coreSchema, couplingControls, couplingValue, filterControls,
+  fxCards, fxChoiceValue, fxFlag, fxNumber, fxPresets, layerOf, layersPage, modulatedKeys, setFxChoice,
+  setFxFlag, setFxNumber, soundMode, soundName, vowelLabel, writableLayer,
 } from './settingsModel';
+import type { SeqLayer } from '../state/types';
 import type { FxChoiceKey, FxNumKey } from './settingsModel';
 
 export type SettingsTab = 'audio' | 'video';
@@ -51,6 +53,54 @@ function section(pane: HTMLElement, title: string, hint?: string): HTMLElement {
   if (hint) head.appendChild(make('span', 'settings-hint', hint));
   pane.appendChild(head);
   return head;
+}
+
+/** A line of text with a check under it: the layer's pattern. `set` returns
+ *  "" when the text was taken, else what is wrong with it. */
+function textRow(o: {
+  id: string; label: string; placeholder: string; get(): string; set(v: string): string;
+}): { row: HTMLElement; input: HTMLInputElement; sync(): void } {
+  const row = make('div', 'ctrl ctrl-select ctrl-text');
+  const label = make('label', undefined, o.label);
+  label.htmlFor = o.id;
+  const input = make('input');
+  input.type = 'text';
+  input.id = o.id;
+  input.placeholder = o.placeholder;
+  input.spellcheck = false;
+  input.autocomplete = 'off';
+  const error = make('div', 'ctrl-error');
+  input.addEventListener('input', () => {
+    const e = o.set(input.value);
+    error.textContent = e;
+    input.classList.toggle('invalid', e !== '');
+  });
+  row.append(label, input, error);
+  const sync = (): void => {
+    input.value = o.get();
+    error.textContent = '';
+    input.classList.remove('invalid');
+  };
+  return { row, input, sync };
+}
+
+type LayerNumber = 'gain' | 'speed' | 'density' | 'humanize';
+const isLayerNumber = (k: string): k is LayerNumber =>
+  k === 'gain' || k === 'speed' || k === 'density' || k === 'humanize';
+
+/** A switch as a row: label, checkbox. */
+function checkRow(o: { id: string; label: string; get(): boolean; set(v: boolean): void }): {
+  row: HTMLElement; sync(): void;
+} {
+  const row = make('div', 'ctrl ctrl-select');
+  const label = make('label', undefined, o.label);
+  label.htmlFor = o.id;
+  const input = make('input');
+  input.type = 'checkbox';
+  input.id = o.id;
+  input.addEventListener('change', () => o.set(input.checked));
+  row.append(label, input);
+  return { row, sync: () => { input.checked = o.get(); } };
 }
 
 function grid(pane: HTMLElement): HTMLElement {
@@ -249,6 +299,8 @@ export class SettingsPage {
       formulas.appendChild(c.root);
     }
 
+    this.buildLayers(pane);
+
     const fxHead = section(pane, 'Effects', 'the chain runs left to right, top to bottom');
     const presetLab = make('label', 'settings-preset', 'Preset ');
     this.fxPreset.id = 'setFxPreset';
@@ -332,6 +384,152 @@ export class SettingsPage {
 
     section(pane, 'Modulation', 'LFOs → sound parameters');
     pane.appendChild(this.soundMod.root);
+  }
+
+  /** The sample and drum layers: recordings and drums over the formulas, in
+   *  rhythms of Strudel's mini-notation (synesthesia-core
+   *  PLAN-SAMPLES-SCRIPTS.md). They go into the effects with the formulas,
+   *  so the section sits between the two. */
+  private buildLayers(pane: HTMLElement): void {
+    const schema = coreSchema();
+    const page = layersPage();
+    section(pane, 'Layers', 'recorded sounds and drums, in rhythms you can write');
+    const layers = grid(pane);
+
+    const tempo = card({ id: 'setLayers', title: 'Tempo', tag: 'all layers', desc: schema.seqDescription });
+    const cps = sliderRow({
+      id: 'setL_cps',
+      label: page.tempo.name,
+      scale: page.tempo,
+      get: () => this.state.seq?.cps ?? 0.5,
+      set: (v) => {
+        this.state.seq ??= { cps: v, layers: [] };
+        this.state.seq.cps = v;
+        this.sound();
+      },
+      modKey: 'seq.cps',
+    });
+    tempo.body.appendChild(cps.row);
+    this.syncs.push(cps.sync, tempo.sync);
+    layers.appendChild(tempo.root);
+
+    const sounds = page.soundGroups.flatMap((g) => g.names.map((n) => ({ value: n, label: n, group: g.group })));
+    const rhythms = [
+      ...schema.seqRhythms.slice(1).map((r) => ({ value: r, label: r })),
+      { value: '', label: page.customRhythm },
+    ];
+    for (let i = 0; i < schema.seqLayers; i++) {
+      const get = (): SeqLayer => layerOf(this.state, i);
+      const set = (f: (l: SeqLayer) => void): void => {
+        f(writableLayer(this.state, i));
+        this.sound();
+      };
+      const c = card({
+        id: `setL_${i}`,
+        title: `Layer ${i + 1}`,
+        desc: schema.seqLayerDescription,
+        toggle: {
+          get: () => get().on,
+          set: (on) => {
+            set((l) => {
+              l.on = on;
+              // a slot used for the first time: something to hear at once
+              if (on && !l.sound) {
+                l.sound = schema.seqSounds[0].name;
+                l.mode = soundMode(l.sound);
+              }
+              if (on && !l.pattern) l.pattern = schema.seqRhythms[1];
+            });
+            syncLayer();
+            this.soundMod.sync(); // routes may now aim at it
+          },
+        },
+      });
+      const sound = selectRow({
+        id: `setL_${i}_sound`,
+        label: 'Sound',
+        options: sounds,
+        get: () => soundName(get().sound),
+        set: (v) => {
+          // a bed is a bed: crickets loop, an owl calls
+          set((l) => { l.sound = v; l.mode = soundMode(v); });
+          mode.sync();
+          showForMode();
+        },
+      });
+      const mode = selectRow({
+        id: `setL_${i}_mode`,
+        label: 'Plays as',
+        options: page.modes,
+        get: () => get().mode,
+        set: (v) => {
+          set((l) => { l.mode = v === 'bed' ? 'bed' : 'hits'; });
+          showForMode();
+        },
+      });
+      const rhythm = selectRow({
+        id: `setL_${i}_rhythm`,
+        label: 'Rhythm',
+        options: rhythms,
+        get: () => (schema.seqRhythms.indexOf(get().pattern) > 0 ? get().pattern : ''),
+        set: (v) => {
+          if (v === '') {
+            pattern.input.focus();
+            return;
+          }
+          set((l) => { l.pattern = v; });
+          pattern.sync();
+        },
+      });
+      const pattern = textRow({
+        id: `setL_${i}_pattern`,
+        label: 'Pattern',
+        placeholder: 'e.g. 0 ~ [0 1] ~ , hh*8?',
+        get: () => get().pattern,
+        // a pattern that does not parse is shown, not applied
+        set: (v) => {
+          const error = checkPattern(v);
+          if (error === '') {
+            set((l) => { l.pattern = v; });
+            rhythm.sync();
+          }
+          return error;
+        },
+      });
+      c.body.append(sound.row, mode.row, rhythm.row, pattern.row);
+      const rows = [sound.sync, mode.sync, rhythm.sync, pattern.sync];
+      // a bed loops under everything: no rhythm, no pattern, no density
+      const forHits: HTMLElement[] = [rhythm.row, pattern.row];
+      const showForMode = (): void => {
+        for (const r of forHits) r.hidden = get().mode === 'bed';
+      };
+      for (const s of page.sliders) {
+        const key = s.k;
+        if (!isLayerNumber(key)) continue;
+        const row = sliderRow({
+          id: `setL_${i}_${key}`,
+          label: s.name,
+          scale: s,
+          get: () => get()[key] ?? 0,
+          set: (v) => set((l) => { l[key] = v; }),
+          modKey: key === 'humanize' ? undefined : `seq.${i}.${key}`,
+        });
+        c.body.appendChild(row.row);
+        rows.push(row.sync);
+        if (key === 'density') forHits.push(row.row);
+      }
+      const dry = checkRow({
+        id: `setL_${i}_dry`,
+        label: 'Past the effects',
+        get: () => get().dry,
+        set: (v) => set((l) => { l.dry = v; }),
+      });
+      c.body.appendChild(dry.row);
+      rows.push(dry.sync, showForMode);
+      const syncLayer = (): void => { for (const s of rows) s(); };
+      this.syncs.push(syncLayer, c.sync);
+      layers.appendChild(c.root);
+    }
   }
 
   // --- Video (chromaflux) ------------------------------------------------------
