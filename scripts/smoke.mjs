@@ -368,6 +368,17 @@ ctxLabel = 'features';
     return hi - lo > 0.01;
   }, null, { timeout: 15000 }).then(() => true).catch(() => false);
   check(breathes, `the exposure does not follow the sound (data-fx-exposure=${await page.evaluate(() => document.body.dataset.fxExposure)})`);
+
+  // A preset with recorded layers: the page fetches the bank, decodes the
+  // sounds it plays and hands them to the worklet (PLAN-SAMPLES-SCRIPTS.md S7).
+  const meadow = (await listPoints()).find((r) => / Night meadow$/.test(r.name))?.ref;
+  check(meadow !== undefined, 'no built-in "Night meadow"');
+  if (meadow) {
+    await pickPoint(meadow);
+    const fed = await page.waitForFunction(() => Number(document.body.dataset.coreSounds ?? 0) >= 3, null, { timeout: 20000 })
+      .then(() => true).catch(() => false);
+    check(fed, `Night meadow's owls, crickets and nightingale never reached the worklet (data-core-sounds=${await page.evaluate(() => document.body.dataset.coreSounds)})`);
+  }
 }
 
 // --- ?preset=N query param ---

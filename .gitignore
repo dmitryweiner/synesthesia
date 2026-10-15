@@ -15,3 +15,6 @@ src/core/pkg/
 .core/
 # the core's wasm, copied in for the points Worker (cloud/package.json "wasm")
 cloud/src/syn_wasm_bg.wasm
+# the sample bank, downloaded by tag and hash (scripts/fetch-bank.mjs)
+public/bank.bin
+.bank/

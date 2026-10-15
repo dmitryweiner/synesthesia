@@ -163,6 +163,38 @@ describe('the core processor', () => {
     expect(last[FRAME.hits]).toBeGreaterThan(0);
   });
 
+  it('plays a layered preset\'s sound once the main thread hands it over', async () => {
+    const { presetNames } = await import('../src/core/pkg/syn_wasm.js');
+    await presetPoint(0); // initialises the module
+    const i = presetNames().indexOf('Night meadow');
+    expect(i).toBeGreaterThan(0);
+    const point = await presetPoint(i);
+    const Ctor = await loadWorklet();
+    const mk = (): Proc => new Ctor({ processorOptions: { module: new WebAssembly.Module(WASM), point } });
+    const [plain, fed] = [mk(), mk()];
+    // an owl, packed as syn_core::seq::bank::pack does: count, then per
+    // variant sr | mode | frames | i16 samples, little-endian
+    const frames = 4000;
+    const pcm = new Uint8Array(4 + 12 + 2 * frames);
+    const dv = new DataView(pcm.buffer);
+    dv.setUint32(0, 1, true);
+    dv.setUint32(4, 24000, true);
+    dv.setUint32(8, 0, true);
+    dv.setUint32(12, frames, true);
+    for (let k = 0; k < frames; k++) dv.setInt16(16 + 2 * k, 12000, true);
+    fed.port.onmessage?.({ data: { type: 'sound', name: encode('owl'), pcm } });
+    for (const p of [plain, fed]) p.port.onmessage?.({ data: { type: 'fadeIn' } });
+    const a = quantum();
+    const b = quantum();
+    let differs = false;
+    for (let k = 0; k < 375 * 8; k++) {
+      plain.process([], a);
+      fed.process([], b);
+      if (a[0][0].some((v, j) => v !== b[0][0][j])) differs = true;
+    }
+    expect(differs).toBe(true);
+  });
+
   it('times a preset on a separate player without moving the live one', async () => {
     const point = await presetPoint(0);
     const Ctor = await loadWorklet();

@@ -840,6 +840,9 @@ async function boot(): Promise<void> {
       document.body.dataset.fxHits = String(++fxHits);
     }
     heardHits = f[FRAME.hits];
+    // for scripts/smoke.mjs: recorded sounds the worklet was given
+    const sounds = String(audio.soundsSent);
+    if (document.body.dataset.coreSounds !== sounds) document.body.dataset.coreSounds = sounds;
     return sound;
   }
 

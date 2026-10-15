@@ -48,7 +48,25 @@ export interface AppState {
   visual: { cards: Record<string, CardState> };
   mod: ModState;
   coupling: Record<string, number>;
+  /** The sample and drum layers (synesthesia-core PLAN-SAMPLES-SCRIPTS.md);
+   *  absent from a point with no layer on. The core reads and writes it; the
+   *  page only carries it. */
+  seq?: SeqState;
 }
+
+export interface SeqLayer {
+  on: boolean;
+  sound: string;
+  pattern: string;
+  gain: number;
+  speed: number;
+  density: number;
+  dry: boolean;
+  mode: 'hits' | 'bed';
+  humanize?: number;
+}
+
+export interface SeqState { cps: number; layers: SeqLayer[] }
 
 /** A slider as the core's schema describes it. */
 export interface SliderDef { k: string; name: string; min: number; max: number; step: number; value: number; exp?: boolean }

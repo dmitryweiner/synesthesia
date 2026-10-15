@@ -59,6 +59,7 @@ class CoreProcessor extends AudioWorkletProcessor {
     switch (c.type) {
       case 'switchTo': this.core.switchTo(c.point); break;
       case 'setPoint': this.core.setPoint(c.point); break;
+      case 'sound': this.core.addSound(c.name, c.pcm); break;
       case 'fadeIn': this.core.fadeIn(); break;
       case 'fadeOut': this.core.fadeOut(); break;
       case 'stats': {

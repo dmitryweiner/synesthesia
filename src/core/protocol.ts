@@ -8,6 +8,11 @@ export type CoreCommand =
   | { type: 'switchTo' | 'setPoint'; point: Uint8Array }
   | { type: 'fadeIn' | 'fadeOut' }
   | { type: 'stats'; reset?: boolean }
+  /** One sound of the sample bank, decoded on the main thread (the worklet
+   *  never decodes): its name as UTF-8 and its samples packed by the core
+   *  (syn-wasm SoundBank.packed). The point's layers that play it sound
+   *  from then on. */
+  | { type: 'sound'; name: Uint8Array; pcm: Uint8Array }
   /** Render `quanta` × 128 samples of `point` on a separate player, timed. */
   | { type: 'bench'; point: Uint8Array; quanta: number }
   /** A stress test: `count` more players of `point` render every quantum

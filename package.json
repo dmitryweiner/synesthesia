@@ -16,7 +16,7 @@
     "analyze": "node scripts/analyze.mjs",
     "check:cloud": "cd cloud && npm run check && npm test",
     "deploy:cloud": "cd cloud && npx wrangler d1 migrations apply synesthesia-presets --remote && npx wrangler deploy",
-    "core": "node scripts/build-core.mjs",
+    "core": "node scripts/build-core.mjs && node scripts/fetch-bank.mjs",
     "bench:core": "npm run core && node scripts/core-bench.mjs",
     "bench:serve": "npm run core && SYN_HTTPS=1 vite --host"
   },
@@ -33,6 +33,10 @@
   },
   "synesthesiaCore": {
     "repo": "https://github.com/dmitryweiner/synesthesia-core",
-    "rev": "bcd68a30d6f530ae83847b3f7b9d2eb3a7bd1077"
+    "rev": "fe04915f61587dad9e28ff5c236db7a6140dc554"
+  },
+  "synesthesiaSamples": {
+    "bank": "https://github.com/dmitryweiner/synesthesia-samples/releases/download/bank-v1/bank.bin",
+    "sha256": "c6ec462a3e057b41ca82a918427f7d7be4efd1c0a437f80a628e2f1cac9bd335"
   }
 }

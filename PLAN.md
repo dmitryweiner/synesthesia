@@ -630,6 +630,21 @@ them as 1-…).
     are in **PLAN-CORE.md**. Until the swap, `main` gets no model changes
     (C7).
 
+## Decisions on recorded samples and rhythms (agreed with the user, 2026-10-15)
+
+30. **Points may carry sample and drum layers** (synesthesia-core
+    PLAN-SAMPLES-SCRIPTS.md): owls, crickets, glass, a drum groove, as a
+    `seq` section of the point. The core plays them; the page carries the
+    section and the sample bank. The bank is synesthesia-samples' release
+    asset `bank-v1`, pinned with its SHA-256 in package.json and fetched by
+    `npm run core` into `public/bank.bin` (never committed). **The worklet
+    never decodes**: the main thread holds the bank (syn-wasm `SoundBank`),
+    decodes the sounds a point needs before sending it, and hands them over
+    as bytes (`sound` command → `AudioCore.addSound`). Five new presets use
+    layers, chosen by the user's ear: Night meadow, Workshop, Glass loom,
+    Molten groove, Bell walk. Smoke checks that Night meadow's sounds reach
+    the worklet.
+
 ## Architecture
 
 Since the swap (PLAN-CORE.md phase 9, 2026-10-06) the model is
