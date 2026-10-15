@@ -640,10 +640,23 @@ them as 1-…).
     `npm run core` into `public/bank.bin` (never committed). **The worklet
     never decodes**: the main thread holds the bank (syn-wasm `SoundBank`),
     decodes the sounds a point needs before sending it, and hands them over
-    as bytes (`sound` command → `AudioCore.addSound`). Five new presets use
+    as bytes (`sound` command → `AudioCore.addSound`). Six presets use
     layers, chosen by the user's ear: Night meadow, Workshop, Glass loom,
-    Molten groove, Bell walk. Smoke checks that Night meadow's sounds reach
-    the worklet.
+    Molten groove, Bell walk, Magic forest. Smoke checks that Night
+    meadow's sounds reach the worklet.
+31. **⚙ Settings edit the layers** *(2026-10-15)*: a Layers section
+    between the formulas and the effects — the tempo, four layer cards
+    (sound by group, hits or bed, a built-in rhythm or the point's own
+    pattern, checked by the core as it is typed and not taken until it
+    parses, gain, speed, density, humanize, past the effects). Reading a
+    layer never adds `seq` to a point, so opening and closing the page is
+    not an edit.
+32. **The picture must not strobe** *(the user, 2026-10-15)*: with the
+    rhythm presets the screen flashed with every hit — a risk for
+    photosensitive epilepsy. The core's picture driver now slews what it
+    reads of the sound (synesthesia-core `sim::calm`); `syn-bench
+    --flashes` counts flashes the WCAG 2.3.1 way, every preset at most one
+    a second.
 
 ## Architecture
 

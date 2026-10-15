@@ -21,6 +21,14 @@ you don't, and the search follows.
   palette, a pool of 4 slow LFOs (sine, triangle, saw, square, S&H, or
   pink: 1/f wandering) with up to 12 routes, and 5 audio→image coupling
   weights. Routes aimed at one parameter add up.
+- **Recorded sounds and rhythms.** Up to four layers of CC0 recordings
+  (owls, nightingales, crickets, fire, creaking wood, bottles, chimes,
+  hand drums — [synesthesia-samples](https://github.com/dmitryweiner/synesthesia-samples))
+  and synth drums, played in rhythms written the way
+  [Strudel](https://strudel.cc/) writes them (`0(3,8)`, `<0 ~ ~ 1>`,
+  `hh*8?`), or looped under everything. Six built-in presets use them
+  (*Night meadow*, *Workshop*, *Glass loom*, *Molten groove*, *Bell
+  walk*, *Magic forest*). The picture follows the hits without strobing.
 - **Shared modulation.** An LFO route can target a synth parameter, an FX
   parameter or an image parameter. The built-in presets use this: in
   *Fractal garden* the same 77-second triangle sweeps the logistic map
@@ -64,8 +72,10 @@ you don't, and the search follows.
 
 **⚙ Settings — for the curious.** A full-screen page with every parameter
 of the current point, in two tabs. *Audio* is formula-synth's panel: the
-formula cards (up to 5 on at once), the effects chain with its one-module
-presets, the master volume and the LFO routes to sound. *Video* is
+formula cards (up to 5 on at once), the layers (a sound, hits or a loop,
+a rhythm or your own pattern, gain, speed, density, humanize), the effects
+chain with its one-module presets, the master volume and the LFO routes to
+sound. *Video* is
 chromaflux's: the reaction, field-variation, flow and palette cards, the
 sound → image links and the LFO routes to the picture. The 4 LFOs are
 shared, so both tabs show them. Sound changes are heard as you make them;

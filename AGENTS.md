@@ -34,7 +34,9 @@ npm run bench:serve # HTTPS dev server on the LAN: open /core-bench.html on a ph
                   # (self-signed: accept the warning). Stop it when done
 npm run smoke     # Playwright: boot, sound, 👍/👎/🎲/undo, every preset,
                   # ?preset=N, save+reload, share link in a 2nd tab, scout,
-                  # ⚙ Settings (picture paused, sound heard, one undo step).
+                  # ⚙ Settings (picture paused, sound heard, one undo step,
+                  # a layer's pattern checked as typed), Night meadow's
+                  # recorded sounds reaching the worklet.
                   # The ONLY check of WebGL2/Web Audio (vitest can't load them)
 npm run snap -- --out shots/x.png [--preset N] [--sound] [--like N] [--dislike N]
                   [--details] [--help] [--res N] [--wait ms]
