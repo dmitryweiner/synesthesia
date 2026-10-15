@@ -33,7 +33,7 @@
   },
   "synesthesiaCore": {
     "repo": "https://github.com/dmitryweiner/synesthesia-core",
-    "rev": "537edc26e0111b0d82e3992d8f64c518a9ea9d29"
+    "rev": "21f02d0ed109787f835349af8f61409c94f8927e"
   },
   "synesthesiaSamples": {
     "bank": "https://github.com/dmitryweiner/synesthesia-samples/releases/download/bank-v1/bank.bin",
