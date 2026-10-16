@@ -94,6 +94,33 @@ test('junk is stripped, out-of-range values clamped before storing', async () =>
   assert.equal(state.audio.formulas.fm.params.fc, 2000);
 });
 
+// The sample and drum layers (synesthesia-core PLAN-SAMPLES-SCRIPTS.md):
+// a Worker on a core from before them dropped `seq` without a word, and
+// every point saved with layers came back without them.
+test('a point with layers keeps them', async () => {
+  const seq = {
+    cps: 0.5,
+    layers: [
+      { on: true, sound: 'owl:1', pattern: '<0 ~ ~ 1> ~ ~ ~', gain: 0.45, speed: 1, density: 1, dry: false, mode: 'hits' },
+      { on: true, sound: 'bd', pattern: '0 ~ ~ 0 ~ ~ 0 ~', gain: 0.2, speed: 1, density: 1, dry: false, mode: 'hits', humanize: 0.5 },
+    ],
+  };
+  const res = await post({ preset_name: 'Layered', audio: { formulas: { fm: { enabled: true } } }, seq });
+  assert.equal(res.status, 201, await res.clone().text());
+  const { id } = await res.json();
+  const state = await (await call(`/v1/points/${id}`)).json();
+  assert.ok(state.seq, 'the layers were stored');
+  assert.equal(state.seq.layers.length, 4, 'a fixed count of slots');
+  assert.equal(state.seq.layers[0].sound, 'owl:1');
+  assert.equal(state.seq.layers[0].pattern, '<0 ~ ~ 1> ~ ~ ~');
+  assert.equal(state.seq.layers[1].humanize, 0.5);
+  assert.equal(state.seq.layers[2].on, false);
+
+  // the same point without its layers is another point
+  const without = await post({ preset_name: 'Layered', audio: { formulas: { fm: { enabled: true } } } });
+  assert.notEqual((await without.json()).id, id);
+});
+
 test('rejects malformed input', async () => {
   assert.equal((await post('{not json')).status, 400);
   assert.equal((await post('"a string"')).status, 422);
