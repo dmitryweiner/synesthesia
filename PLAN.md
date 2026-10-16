@@ -658,6 +658,17 @@ them as 1-…).
     --flashes` counts flashes the WCAG 2.3.1 way, every preset at most one
     a second.
 
+## Decisions after review (agreed with the user, 2026-10-16)
+
+33. **The address names the point playing, until a step away from it.**
+    `?preset=N` was cleaned from the address as soon as the preset opened;
+    now it is treated as `?presetId=` (#9): it stays after opening such a
+    link, picking a built-in from the list writes it, 💾 Save replaces it
+    with the saved point's `?presetId=`, and the first 👍/👎/🎲 or ⚙ edit
+    clears it. A reload while it is there opens the same preset; after a
+    step the address is clean and the last point comes from localStorage,
+    as before. (`N` is the preset's index: presets are only appended.)
+
 ## Architecture
 
 Since the swap (PLAN-CORE.md phase 9, 2026-10-06) the model is

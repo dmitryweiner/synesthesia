@@ -402,6 +402,13 @@ await openApp(qp, app(`${BASE}/?preset=2`));
 const q2 = (await listPoints()).find((r) => r.ref === 'b:2')?.name ?? '';
 check((await statusText(qp)).includes(q2.replace(/^2: /, '')), `?preset=2 did not load "${q2}"`);
 check(((await qp.locator('#pointsBtn').textContent()) ?? '').includes(q2), `?preset=2 should show the preset as current: "${await qp.locator('#pointsBtn').textContent()}"`);
+// the link names the point playing until a step away from it, as ?presetId= does
+check((await qp.evaluate(() => new URLSearchParams(location.search).get('preset'))) === '2', `?preset=2 should stay in the address: "${await qp.evaluate(() => location.search)}"`);
+await pickPoint('b:4', qp);
+check((await qp.evaluate(() => new URLSearchParams(location.search).get('preset'))) === '4', `picking a built-in should name it in the address: "${await qp.evaluate(() => location.search)}"`);
+await qp.locator('#likeBtn').click();
+await qp.waitForTimeout(300);
+check(!(await qp.evaluate(() => location.search)).includes('preset='), `?preset= should go away after a step: "${await qp.evaluate(() => location.search)}"`);
 await qp.close();
 
 // --- save a point, reload, load it back ---
@@ -424,13 +431,21 @@ check(saved[0]?.mine === true, `saved points should be listed above the built-in
 check(savedMine[0].name.includes('Smoke point'), `the saved point should carry its name: "${savedMine[0].name}"`);
 check(((await page.locator('#pointsBtn').textContent()) ?? '').includes('Smoke point'), 'the toolbar should show the saved point as current');
 check((await statusText()).includes('Smoke point'), `save should confirm in the status line: "${await statusText()}"`);
+const afterSave = await page.evaluate(() => Object.fromEntries(new URLSearchParams(location.search)));
+check(/^[0-9A-Za-z]{10}$/.test(afterSave.presetId ?? '') && afterSave.preset === undefined,
+  `after a save the address should name the saved point, not the built-in: ${JSON.stringify(afterSave)}`);
 // the point itself goes to the points database; only name+id stay local
 check((await worker.db.prepare('SELECT COUNT(*) AS n FROM points').first()).n === pointsBefore.n + 1, 'saving should store the point in the database');
 const localList = await page.evaluate(() => localStorage.getItem('synesthesia_library_v1') ?? '');
 check(localList.includes('Smoke point') && localList.length < 200, `the local list should be a short name+id list: ${localList.length} chars`);
 check(!(await page.evaluate(() => Object.keys(localStorage))).includes('synesthesia_user_presets_v1'), 'nothing should write whole points locally any more');
 const beforeReload = await lastPoint();
+// the address names the saved point (?presetId=, PLAN.md #33): a reload opens it from the database
 await page.reload();
+await page.waitForSelector('body[data-launched="1"]', { timeout: 30000 });
+check((await statusText()).startsWith('opened link') && (await statusText()).includes('Smoke point'), `a reload after a save should open the saved point: "${await statusText()}"`);
+// a clean address restores the last point from localStorage
+await page.goto(app(`${BASE}/`));
 await page.waitForSelector('body[data-ready="1"]', { timeout: 30000 });
 check(await page.locator('#help').isHidden(), 'help dialog should not reopen after the first visit');
 check((await statusText()).startsWith('restored'), `reload should restore the last point: "${await statusText()}"`);

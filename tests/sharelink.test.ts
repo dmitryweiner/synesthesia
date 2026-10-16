@@ -1,4 +1,4 @@
-import { cleanUrl, withPresetId } from '../src/state/launch';
+import { cleanUrl, withPreset, withPresetId } from '../src/state/launch';
 import { encodeToken, parseLaunch } from '../src/core/session';
 import { sharePoint, fetchPoint, PRESETS_API, StaleServerError } from '../src/state/cloud';
 import { pointIdOf } from '../src/core/point';
@@ -29,6 +29,12 @@ describe('launch URL', () => {
     expect(cleanUrl(`${base}?presetId=Ab3xK9pQ2m&res=256&scout=0#s=abc`)).toBe(`${base}?res=256&scout=0`);
     expect(cleanUrl(`${base}?preset=3`)).toBe(base);
     expect(cleanUrl(`${base}?api=http%3A%2F%2Flocalhost%3A8787`)).toBe(`${base}?api=http%3A%2F%2Flocalhost%3A8787`);
+  });
+
+  it('withPreset names a built-in on a clean URL, in place of any other point', () => {
+    expect(withPreset(`${base}?res=256&presetId=Ab3xK9pQ2m#s=abc`, 15)).toBe(`${base}?res=256&preset=15`);
+    expect(withPreset(`${base}?preset=3`, 0)).toBe(`${base}?preset=0`);
+    expect(parseLaunch(withPreset(base, 15))).toEqual({ kind: 'preset', index: 15 });
   });
 
   it('withPresetId puts the short id on a clean URL', () => {

@@ -12,7 +12,7 @@ import { CoreEngine } from './audio/coreEngine';
 import { IosAudioUnlock } from './audio/iosUnlock';
 import type { AppState } from './state/types';
 import { DEFAULT_PRESET_INDEX, builtInPresets } from './core/point';
-import { cleanUrl, withPresetId } from './state/launch';
+import { cleanUrl, withPreset, withPresetId } from './state/launch';
 import { fetchPoint, sharePoint, StaleServerError } from './state/cloud';
 import { loadLastPoint, saveLastPoint } from './state/lastPoint';
 import { loadUserPresets, saveUserPresets, clearUserPresets } from './state/userPresets';
@@ -395,7 +395,7 @@ async function boot(): Promise<void> {
     if (ref.startsWith('b:')) {
       const p = PRESETS[index];
       if (!p) return;
-      loadState(structuredClone(p.state), 'loaded');
+      loadState(structuredClone(p.state), 'loaded', withPreset(location.href, index));
       setPointRef(ref);
     } else if (ref.startsWith('l:')) {
       const p = legacy[index];
@@ -555,6 +555,8 @@ async function boot(): Promise<void> {
       setStatus(`${storageProblem(`couldn't add “${s.preset_name}” to your points`, result.reason)}. It is stored, though: ${withPresetId(location.href, id)}`);
       return;
     }
+    // the address names the point playing: the saved one now, not the built-in
+    history.replaceState(null, '', withPresetId(location.href, id));
     setPointRef(`u:${library.findIndex((p) => p.name === s.preset_name)}`);
     flash(saveBtn, '💾 Saved');
     setStatus(`saved as “${s.preset_name}” — it's in the points list, under “My points”`);
@@ -923,7 +925,7 @@ async function boot(): Promise<void> {
   } else if (launch.kind === 'point') {
     loadState(launch.point, 'opened link');
   } else if (launch.kind === 'preset' && PRESETS[launch.index]) {
-    loadState(structuredClone(PRESETS[launch.index].state), 'loaded');
+    loadState(structuredClone(PRESETS[launch.index].state), 'loaded', withPreset(location.href, launch.index));
     setPointRef(`b:${launch.index}`);
   } else {
     openFallback(cleanUrl(location.href));
