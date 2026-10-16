@@ -26,9 +26,9 @@ you don't, and the search follows.
   hand drums — [synesthesia-samples](https://github.com/dmitryweiner/synesthesia-samples))
   and synth drums, played in rhythms written the way
   [Strudel](https://strudel.cc/) writes them (`0(3,8)`, `<0 ~ ~ 1>`,
-  `hh*8?`), or looped under everything. Six built-in presets use them
-  (*Night meadow*, *Workshop*, *Glass loom*, *Molten groove*, *Bell
-  walk*, *Magic forest*). The picture follows the hits without strobing.
+  `hh*8?`), or looped under everything. Five built-in presets use them
+  (*Night meadow*, *Workshop*, *Glass loom*, *Magic forest*, *Sea
+  shore*). The picture follows the hits without strobing.
 - **Shared modulation.** An LFO route can target a synth parameter, an FX
   parameter or an image parameter. The built-in presets use this: in
   *Fractal garden* the same 77-second triangle sweeps the logistic map
