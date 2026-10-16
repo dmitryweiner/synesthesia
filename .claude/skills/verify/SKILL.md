@@ -31,7 +31,12 @@ npm run check:cloud    # Worker tsc + Miniflare tests (~30 s)
 The Worker validates with the core's wasm (sanitizePoint, pointId); its
 tests post every point of the core's fixture (the production D1 points
 included) and expect the ids they had. A change there changes what the
-Worker stores: redeploy (`npm run deploy:cloud`) only by the user's go.
+Worker stores: redeploy (`npm run deploy:cloud`) only by the user's go —
+but **offer it every time the pin bump changes the point** (a field, a
+range, a sound): green tests here say nothing about the deployed Worker,
+which keeps the core it was deployed with and silently drops what that core
+does not know (the layers, 2026-10-16). `npx wrangler deployments list` in
+cloud/ (Node ≥ 22) shows when it was last deployed.
 
 ## 3. Browser smoke — the only check of WebGL2 + Web Audio
 
@@ -84,6 +89,11 @@ every push and deploys Pages from main: check `gh run list --limit 2`.
   sound first.
 - **Onset/hit counts look low in the browser** → headless frame rate, not the
   app: the truth is the core's `tests/onsets.rs` and `syn-bench --onsets`.
+- **Save says "the points server is out of date"** → the deployed Worker's
+  core is older than the pin (`StaleServerError`): `npm run deploy:cloud`.
+- **Save fails in the smoke with "unreachable"** → CORS: the local Worker
+  must allow the page's origin (`startPointsWorker(BASE)`; the dev server
+  takes the first free port).
 - **The app plays another core than the pin says** → `src/core/pkg/REV`;
   `npm run core` rebuilds when it differs (and touches the checkout, since
   one cargo target dir serves every rev).

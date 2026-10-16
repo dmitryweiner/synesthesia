@@ -13,7 +13,7 @@ import { IosAudioUnlock } from './audio/iosUnlock';
 import type { AppState } from './state/types';
 import { DEFAULT_PRESET_INDEX, builtInPresets } from './core/point';
 import { cleanUrl, withPresetId } from './state/launch';
-import { fetchPoint, sharePoint } from './state/cloud';
+import { fetchPoint, sharePoint, StaleServerError } from './state/cloud';
 import { loadLastPoint, saveLastPoint } from './state/lastPoint';
 import { loadUserPresets, saveUserPresets, clearUserPresets } from './state/userPresets';
 import { LIBRARY_KEY, loadLibrary, saveLibrary, removePoint, suggestPointName, upsertPoint } from './state/library';
@@ -536,8 +536,10 @@ async function boot(): Promise<void> {
     let id: string;
     try {
       id = await sharePoint(s, { api });
-    } catch {
-      setStatus(`couldn't save “${s.preset_name}” — the points server is unreachable; try again in a moment`);
+    } catch (err) {
+      setStatus(err instanceof StaleServerError
+        ? `couldn't save “${s.preset_name}” — the points server is out of date and would lose part of it (its layers); use 🔗 Share for a long link meanwhile`
+        : `couldn't save “${s.preset_name}” — the points server is unreachable; try again in a moment`);
       return;
     } finally {
       saveBtn.disabled = false;

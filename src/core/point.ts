@@ -1,7 +1,7 @@
 // A point from outside (a stored point, localStorage, an old link) made safe,
 // and the built-in presets — the core's (syn_core::point, syn_core::state),
 // through the main thread's wasm (PLAN-CORE.md C2).
-import { presetNames, presetStateJson, sanitizePoint } from './pkg/syn_wasm.js';
+import { pointId, presetNames, presetStateJson, sanitizePoint } from './pkg/syn_wasm.js';
 import type { AppState } from '../state/types';
 
 /** The complete point `u` sanitizes to (every value clamped, malformed
@@ -18,6 +18,19 @@ export function sanitize(u: unknown): AppState | null {
   if (canonical === undefined) return null;
   const point: AppState = JSON.parse(canonical);
   return point;
+}
+
+/** The id the points Worker stores `u` under — the id of its sanitized,
+ *  canonical form — or null when it is not a point. */
+export function pointIdOf(u: unknown): string | null {
+  let json: string;
+  try {
+    json = JSON.stringify(u);
+  } catch {
+    return null;
+  }
+  const canonical = sanitizePoint(json ?? 'null');
+  return canonical === undefined ? null : pointId(canonical);
 }
 
 export interface Preset { name: string; state: AppState }

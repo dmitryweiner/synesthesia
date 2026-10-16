@@ -202,8 +202,13 @@ Corollaries:
 - `cloud/src/index.ts` validates and ids points with the core's wasm
   (`sanitizePoint`, `pointId`; `npm run build` in cloud/ copies
   `syn_wasm_bg.wasm` from src/core/pkg): one validation and one id function
-  for the apps and the server. A pin bump that changes sanitization changes
-  what the Worker accepts — `npm run deploy:cloud` after such a bump.
+  for the apps and the server. **A pin bump that changes the point — a new
+  field, a new range, a new sound — needs `npm run deploy:cloud`** (the
+  user's go). A Worker on an older core drops what it does not know without
+  an error: on 2026-10-16 it was still on the core of 10-06 and every point
+  saved with layers (23) had lost `seq`. The page now refuses such a save
+  (`StaleServerError`: the server's id is not the point's own) and Share
+  falls back to the long link, so a stale Worker shows up as failed saves.
 - The point's name is `preset_name` (PLAN-CORE.md phase 10); stored rows and
   old links say `presetName`, which the core reads for good. The id is
   hashed over the old spelling, so ids never moved — don't "fix" that.

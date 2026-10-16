@@ -20,7 +20,7 @@ import { parseFlags, startServer, launchBrowser, captureErrors, openApp, withRes
 const { flags } = parseFlags(process.argv.slice(2), ['screenshot', 'res']);
 const RES = Number(flags.get('res') ?? 128);
 const { BASE, stop } = await startServer(flags.has('preview'));
-const worker = await startPointsWorker();
+const worker = await startPointsWorker(BASE);
 // every app URL: small grid + the local points Worker
 const app = (url) => withParam(withRes(url, RES), 'api', worker.url);
 const lastPoint = (p = page) => p.evaluate(() => localStorage.getItem('synesthesia_last_point_v1'));

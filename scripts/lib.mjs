@@ -113,9 +113,11 @@ export function withParam(url, key, value) {
 /**
  * Runs the points Worker (cloud/) locally in Miniflare with a fresh in-memory
  * D1 — so scripts exercise Share/open-link end to end without writing into
- * the production database. Needs `npm install` in cloud/ once.
+ * the production database. Needs `npm install` in cloud/ once. `origin` is
+ * the page's (startServer's BASE): the server takes the first free port, and
+ * a Worker that allows only :5173 refuses every request from another one.
  */
-export async function startPointsWorker(port = 8787) {
+export async function startPointsWorker(origin, port = 8787) {
   if (!existsSync(`${CLOUD}node_modules/miniflare`)) {
     throw new Error('cloud/node_modules missing — run `npm install` in cloud/ first');
   }
@@ -129,7 +131,7 @@ export async function startPointsWorker(port = 8787) {
     ],
     compatibilityDate: '2026-09-01',
     port,
-    bindings: { ALLOWED_ORIGINS: 'http://localhost:5173 http://localhost:4173' },
+    bindings: { ALLOWED_ORIGINS: origin },
     d1Databases: ['DB'],
     ratelimits: {
       SAVE_LIMIT: { namespace_id: '1', simple: { limit: 1000, period: 60 } },

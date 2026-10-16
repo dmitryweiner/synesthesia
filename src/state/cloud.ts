@@ -2,7 +2,7 @@
 // short content-addressed id; GET an id → the point. fetch is injectable for
 // tests; every request has a timeout so a dead network never hangs Share.
 import type { AppState } from './types';
-import { isPointId, sanitize } from '../core/point';
+import { isPointId, pointIdOf, sanitize } from '../core/point';
 
 export const PRESETS_API = 'https://synesthesia-presets.dmitry-weiner.workers.dev';
 
@@ -29,7 +29,18 @@ function isRecord(u: unknown): u is Record<string, unknown> {
   return typeof u === 'object' && u !== null;
 }
 
-/** Stores the point; resolves to its short id. Rejects on network/HTTP/format errors. */
+/** The server stored something other than the point it was sent: its core
+ *  is older than the page's and dropped what it does not know (2026-10-16:
+ *  a Worker from before the layers dropped `seq`). Redeploy the Worker. */
+export class StaleServerError extends Error {
+  constructor() {
+    super('the points server is out of date: it would not store the whole point');
+    this.name = 'StaleServerError';
+  }
+}
+
+/** Stores the point; resolves to its short id. Rejects on network/HTTP/format
+ *  errors, and with a StaleServerError when the server's id is not the point's. */
 export async function sharePoint(state: AppState, opts: CloudOptions = {}): Promise<string> {
   const res = await request('/v1/points', {
     method: 'POST',
@@ -40,6 +51,8 @@ export async function sharePoint(state: AppState, opts: CloudOptions = {}): Prom
   const body: unknown = await res.json();
   const id = isRecord(body) ? body.id : undefined;
   if (typeof id !== 'string' || !isPointId(id)) throw new Error('share failed: malformed reply');
+  // The id is the hash of what was stored; ours is the hash of the whole point.
+  if (id !== pointIdOf(state)) throw new StaleServerError();
   return id;
 }
 

@@ -1,6 +1,7 @@
 import { cleanUrl, withPresetId } from '../src/state/launch';
 import { encodeToken, parseLaunch } from '../src/core/session';
-import { sharePoint, fetchPoint, PRESETS_API } from '../src/state/cloud';
+import { sharePoint, fetchPoint, PRESETS_API, StaleServerError } from '../src/state/cloud';
+import { pointIdOf } from '../src/core/point';
 import { saveLastPoint, loadLastPoint, LAST_POINT_KEY } from '../src/state/lastPoint';
 import { defaultPoint as defaultAppState } from './points';
 
@@ -50,9 +51,10 @@ function fakeFetch(respond: (a: FetchArgs) => Response | Promise<Response>): { f
 
 describe('cloud client', () => {
   it('sharePoint POSTs the state as JSON and returns the id', async () => {
-    const { fetch: f, calls } = fakeFetch(() => Response.json({ id: 'Ab3xK9pQ2m' }, { status: 201 }));
+    const real = pointIdOf(defaultAppState());
+    const { fetch: f, calls } = fakeFetch(() => Response.json({ id: real }, { status: 201 }));
     const id = await sharePoint(defaultAppState(), { fetch: f, api: 'https://api.test' });
-    expect(id).toBe('Ab3xK9pQ2m');
+    expect(id).toBe(real);
     expect(calls[0].url).toBe('https://api.test/v1/points');
     expect(calls[0].init?.method).toBe('POST');
     expect(JSON.parse(String(calls[0].init?.body))).toEqual(defaultAppState());
@@ -63,6 +65,20 @@ describe('cloud client', () => {
     await expect(sharePoint(defaultAppState(), { fetch: bad.fetch })).rejects.toThrow();
     const junk = fakeFetch(() => Response.json({ id: 'not an id' }));
     await expect(sharePoint(defaultAppState(), { fetch: junk.fetch })).rejects.toThrow();
+  });
+
+  // The Worker sanitizes with its own copy of the core: one deployed before
+  // the layers dropped `seq` without a word, and the point was stored
+  // without them under another id. The id it answers must be ours.
+  it('sharePoint rejects an id that is not the point\'s own (a server on an older core)', async () => {
+    const s = defaultAppState();
+    s.audio.formulas.fm.enabled = true;
+    s.seq = { cps: 0.5, layers: [{ on: true, sound: 'owl', pattern: '0 ~', gain: 0.4, speed: 1, density: 1, dry: false, mode: 'hits' }] };
+    const withoutLayers = { ...s, seq: undefined };
+    const stale = fakeFetch(() => Response.json({ id: pointIdOf(withoutLayers) }, { status: 201 }));
+    await expect(sharePoint(s, { fetch: stale.fetch })).rejects.toBeInstanceOf(StaleServerError);
+    const fresh = fakeFetch(() => Response.json({ id: pointIdOf(s) }, { status: 201 }));
+    expect(await sharePoint(s, { fetch: fresh.fetch })).toBe(pointIdOf(s));
   });
 
   it('sharePoint times out', async () => {
