@@ -195,6 +195,40 @@ describe('the core processor', () => {
     expect(differs).toBe(true);
   });
 
+  it('plays two ears: a wide point differs between them, a narrow one does not', async () => {
+    const { presetStateJson } = await import('../src/core/pkg/syn_wasm.js');
+    await presetPoint(0);
+    const narrow = JSON.parse(presetStateJson(0) ?? '{}');
+    const wide = structuredClone(narrow);
+    wide.bin = { on: true, beat: 6, width: 1 };
+    for (const f of Object.values<{ enabled: boolean; params: Record<string, number> }>(wide.audio.formulas)) {
+      if (f.enabled) f.params.az = 80;
+    }
+    const Ctor = await loadWorklet();
+    const play = (point: unknown): { l: number; r: number; differs: boolean } => {
+      const p = new Ctor({ processorOptions: { module: new WebAssembly.Module(WASM), point: encode(JSON.stringify(point)) } });
+      p.port.onmessage?.({ data: { type: 'fadeIn' } });
+      const out = quantum();
+      let l = 0;
+      let r = 0;
+      let differs = false;
+      for (let i = 0; i < 375 * 2; i++) {
+        p.process([], out);
+        for (let j = 0; j < 128; j++) {
+          l += out[0][0][j] ** 2;
+          r += out[0][1][j] ** 2;
+          if (out[0][0][j] !== out[0][1][j]) differs = true;
+        }
+      }
+      return { l, r, differs };
+    };
+    expect(play(narrow).differs).toBe(false);
+    const w = play(wide);
+    expect(w.differs).toBe(true);
+    // every voice at +80°: the right ear is the louder one
+    expect(w.r).toBeGreaterThan(w.l);
+  });
+
   it('times a preset on a separate player without moving the live one', async () => {
     const point = await presetPoint(0);
     const Ctor = await loadWorklet();

@@ -50,8 +50,17 @@ export function renderDetails(root: HTMLElement, state: AppState, analysis: Scou
   for (const f of schema.formulas) {
     const snap = state.audio.formulas[f.id];
     if (!snap?.enabled) continue;
-    const parts = f.sliders.slice(0, 4).map((s) => `${s.name.replace(/ \(.*\)/, '')} ${fmt(snap.params[s.k])}`);
+    // a slider the point does not state is at its default (a centred az is never written)
+    const parts = f.sliders.filter((s) => s.k !== 'az').slice(0, 4)
+      .map((s) => `${s.name.replace(/ \(.*\)/, '')} ${fmt(snap.params[s.k] ?? s.value)}`);
+    const az = snap.params.az ?? 0;
+    if (az !== 0 && (state.bin?.width ?? 0) > 0) parts.push(`${az > 0 ? 'right' : 'left'} ${fmt(Math.abs(az))}°`);
     formulas.push(`${f.title}: ${parts.join(', ')}`);
+  }
+  if (state.bin) {
+    const space = [`width ${fmt(state.bin.width)}`];
+    if (state.bin.on) space.push(`binaural beat ${fmt(state.bin.beat)} Hz`);
+    formulas.push(`Space (headphones): ${space.join(', ')}`);
   }
   section(root, 'Sound', formulas);
 

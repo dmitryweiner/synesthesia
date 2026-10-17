@@ -16,9 +16,9 @@ import { card, fillSelect, selectRow, sliderRow } from './controls';
 import type { Card } from './controls';
 import { ModPanel } from './modPanel';
 import {
-  applyFxPreset, canEnableFormula, checkPattern, coreSchema, couplingControls, couplingValue, filterControls,
+  applyFxPreset, binauralPage, binOf, canEnableFormula, checkPattern, coreSchema, couplingControls, couplingValue, filterControls,
   fxCards, fxChoiceValue, fxFlag, fxNumber, fxPresets, layerOf, layersPage, modulatedKeys, setFxChoice,
-  setFxFlag, setFxNumber, soundMode, soundName, vowelLabel, writableLayer,
+  setFxFlag, setFxNumber, soundMode, soundName, vowelLabel, writableBin, writableLayer,
 } from './settingsModel';
 import type { SeqLayer } from '../state/types';
 import type { FxChoiceKey, FxNumKey } from './settingsModel';
@@ -84,9 +84,9 @@ function textRow(o: {
   return { row, input, sync };
 }
 
-type LayerNumber = 'gain' | 'speed' | 'density' | 'humanize';
+type LayerNumber = 'gain' | 'speed' | 'density' | 'humanize' | 'az';
 const isLayerNumber = (k: string): k is LayerNumber =>
-  k === 'gain' || k === 'speed' || k === 'density' || k === 'humanize';
+  k === 'gain' || k === 'speed' || k === 'density' || k === 'humanize' || k === 'az';
 
 /** A switch as a row: label, checkbox. */
 function checkRow(o: { id: string; label: string; get(): boolean; set(v: boolean): void }): {
@@ -287,7 +287,7 @@ export class SettingsPage {
           id: `setA_${f.id}_${s.k}`,
           label: s.name,
           scale: s,
-          get: () => snap().params[s.k],
+          get: () => snap().params[s.k] ?? s.value,
           set: (v) => { snap().params[s.k] = v; this.sound(); },
           modKey: `${f.id}.${s.k}`,
         });
@@ -381,6 +381,8 @@ export class SettingsPage {
       fxGrid.appendChild(c.root);
     }
     this.syncs.push(...fxSyncs);
+
+    this.buildBinaural(pane);
 
     section(pane, 'Modulation', 'LFOs → sound parameters');
     pane.appendChild(this.soundMod.root);
@@ -530,6 +532,50 @@ export class SettingsPage {
       this.syncs.push(syncLayer, c.sync);
       layers.appendChild(c.root);
     }
+  }
+
+  /** Space and the binaural beat (synesthesia-core PLAN-BINAURAL.md): the
+   *  width that spreads every voice by its azimuth, and the beat between the
+   *  ears. After the effects: the beat shifts the whole mix, reverb and all. */
+  private buildBinaural(pane: HTMLElement): void {
+    const page = binauralPage();
+    section(pane, 'Space', 'where the voices sit, and a beat between the ears');
+    const g = grid(pane);
+    const c = card({ id: 'setBin', title: page.title, tag: page.tag, desc: coreSchema().binDescription });
+    const set = (f: (b: ReturnType<typeof writableBin>) => void): void => {
+      f(writableBin(this.state));
+      this.sound();
+    };
+    const width = sliderRow({
+      id: 'setBin_width',
+      label: page.width.name,
+      scale: page.width,
+      get: () => binOf(this.state).width,
+      set: (v) => set((b) => { b.width = v; }),
+      modKey: 'bin.width',
+    });
+    const on = checkRow({
+      id: 'setBin_on',
+      label: page.on,
+      get: () => binOf(this.state).on,
+      set: (v) => {
+        set((b) => { b.on = v; });
+        showBeat();
+      },
+    });
+    const beat = sliderRow({
+      id: 'setBin_beat',
+      label: page.beat.name,
+      scale: page.beat,
+      get: () => binOf(this.state).beat,
+      set: (v) => set((b) => { b.beat = v; }),
+      modKey: 'bin.beat',
+    });
+    // the beat's rate means nothing while the beat is off
+    const showBeat = (): void => { beat.row.hidden = !binOf(this.state).on; };
+    c.body.append(width.row, on.row, beat.row);
+    this.syncs.push(width.sync, on.sync, beat.sync, showBeat, c.sync);
+    g.appendChild(c.root);
   }
 
   // --- Video (chromaflux) ------------------------------------------------------

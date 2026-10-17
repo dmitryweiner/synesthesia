@@ -52,6 +52,19 @@ export interface AppState {
    *  absent from a point with no layer on. The core reads and writes it; the
    *  page only carries it. */
   seq?: SeqState;
+  /** Space and the binaural beat (synesthesia-core PLAN-BINAURAL.md);
+   *  absent from a point that is neither wide nor beating. Heard only in
+   *  stereo, on headphones. */
+  bin?: BinState;
+}
+
+export interface BinState {
+  /** The beat is on. */
+  on: boolean;
+  /** Hz: the left ear hears the point beat/2 lower, the right beat/2 higher. */
+  beat: number;
+  /** 0–1: scales every voice's azimuth (`az`). 0 is the mono image. */
+  width: number;
 }
 
 export interface SeqLayer {
@@ -64,6 +77,8 @@ export interface SeqLayer {
   dry: boolean;
   mode: 'hits' | 'bed';
   humanize?: number;
+  /** Where the layer sits, −90° (left) … 90° (right); absent is ahead. */
+  az?: number;
 }
 
 export interface SeqState { cps: number; layers: SeqLayer[] }

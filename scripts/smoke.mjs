@@ -288,6 +288,17 @@ ctxLabel = 'settings';
   await page.waitForTimeout(200);
   check((await soundEdits()) > edits1, 'a layer edit did not reach the engine');
 
+  // Binaural: the width is heard; the beat's rate shows only with the beat on
+  check(await page.locator('#setL_3_az').count() === 1, 'a layer should have its azimuth');
+  const beatRow = page.locator('#setBin_beat').locator('xpath=ancestor::div[contains(@class,"ctrl")][1]');
+  check(await beatRow.isHidden(), 'the beat\'s rate should hide while the beat is off');
+  const edits2 = await soundEdits();
+  await page.locator('#setBin_width').evaluate((n) => { n.value = n.max; n.dispatchEvent(new Event('input', { bubbles: true })); });
+  await page.locator('#setBin_on').check();
+  check(await beatRow.isVisible(), 'the beat\'s rate should show with the beat on');
+  await page.waitForTimeout(200);
+  check((await soundEdits()) > edits2, 'a binaural edit did not reach the engine');
+
   // Video: the other tab; picture changes wait for the close
   await page.locator('#tabVideo').click();
   check(await page.locator('#paneVideo').isVisible() && await page.locator('#paneAudio').isHidden(), 'the Video tab did not switch the pane');
@@ -318,6 +329,8 @@ ctxLabel = 'settings';
   check(((await page.locator('#undoBtn').textContent()) ?? '').includes('(1)'), `the edit should be one undoable step: "${await page.locator('#undoBtn').textContent()}"`);
   const edited = await lastPoint();
   check(!samePoint(edited, before), 'the edited point was not kept');
+  const editedBin = JSON.parse(edited ?? '{}').bin;
+  check(editedBin?.on === true && editedBin.width === 1, `the binaural edit was not kept: ${JSON.stringify(editedBin)}`);
   check(JSON.parse(edited ?? '{}').visual?.cards?.palette?.params?.paletteId === Number(palNow === '2' ? '3' : '2'), 'the palette picked in the settings is not in the point');
   await page.locator('#undoBtn').click();
   await lastPointChange(edited); // the undo morph, then the settle that saves the point

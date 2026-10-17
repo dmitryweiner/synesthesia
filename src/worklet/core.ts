@@ -9,6 +9,10 @@
 //   the audio exports speak numbers and byte arrays only;
 // - nothing allocates per quantum: the output is one view onto the module's
 //   memory, remade only when the memory grows.
+// The player is stereo (synesthesia-core PLAN-BINAURAL.md): the point's
+// space and beat in two ears, rendered interleaved (L R L R …) and split
+// into the node's two output channels here. A point that is neither wide
+// nor beating plays the mono sound in both, bit for bit.
 import './textPolyfill';
 import { initSync, AudioCore } from '../core/pkg/syn_wasm.js';
 import { CORE_PROCESSOR, FRAME_LEN, FRAME_POST_QUANTA, type CoreBenchResult, type CoreCommand, type CoreProcessorOptions, type CoreStats } from '../core/protocol';
@@ -45,7 +49,7 @@ class CoreProcessor extends AudioWorkletProcessor {
     const module = o.module ?? o.bytes;
     if (module === undefined) throw new Error('synesthesia-core: no module');
     this.memory = initSync({ module }).memory;
-    const core = AudioCore.create(sampleRate, o.point, 128);
+    const core = AudioCore.createStereo(sampleRate, o.point, 128);
     if (!core) throw new Error('synesthesia-core: the initial point does not parse');
     this.core = core;
     this.port.onmessage = (e: MessageEvent) => { if (isCommand(e.data)) this.command(e.data); };
@@ -76,7 +80,7 @@ class CoreProcessor extends AudioWorkletProcessor {
         for (const b of this.ballast) b.free();
         this.ballast = [];
         for (let i = 0; i < c.count; i++) {
-          const b = AudioCore.create(sampleRate, c.point, 128);
+          const b = AudioCore.createStereo(sampleRate, c.point, 128);
           if (!b) break;
           b.fadeIn();
           this.ballast.push(b);
@@ -84,12 +88,12 @@ class CoreProcessor extends AudioWorkletProcessor {
         break;
       }
       case 'bench': {
-        const p = AudioCore.create(sampleRate, c.point, 128);
+        const p = AudioCore.createStereo(sampleRate, c.point, 128);
         const result: CoreBenchResult = { type: 'bench', quanta: c.quanta, ms: 0, ok: p !== undefined };
         if (p) {
           p.fadeIn();
           const t0 = Date.now();
-          for (let i = 0; i < c.quanta; i++) p.render(128);
+          for (let i = 0; i < c.quanta; i++) p.renderStereo(128);
           result.ms = Date.now() - t0;
           p.free();
         }
@@ -103,15 +107,19 @@ class CoreProcessor extends AudioWorkletProcessor {
     const start = Date.now();
     const channels = outputs[0];
     const n = channels[0].length;
-    const ptr = this.core.render(n);
-    for (const b of this.ballast) b.render(n);
-    if (ptr !== this.outPtr || this.memory.buffer !== this.outBuffer || this.out.length !== n) {
+    const ptr = this.core.renderStereo(n);
+    for (const b of this.ballast) b.renderStereo(n);
+    if (ptr !== this.outPtr || this.memory.buffer !== this.outBuffer || this.out.length !== 2 * n) {
       this.outBuffer = this.memory.buffer;
       this.outPtr = ptr;
-      this.out = new Float32Array(this.outBuffer, ptr, n);
+      this.out = new Float32Array(this.outBuffer, ptr, 2 * n);
       this.stats.views++;
     }
-    for (const ch of channels) ch.set(this.out);
+    const out = this.out;
+    const left = channels[0];
+    const right = channels.length > 1 ? channels[1] : null;
+    for (let j = 0; j < n; j++) left[j] = out[2 * j];
+    if (right) for (let j = 0; j < n; j++) right[j] = out[2 * j + 1];
     const s = this.stats;
     s.renderMs += Date.now() - start;
     s.quanta++;

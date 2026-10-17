@@ -3,13 +3,13 @@
 // whose tests hold the guarantee that everything the page lets you set
 // survives the genome); what stays here is the page's own presentation —
 // how a slider maps to a value and how a value reads.
-import type { AppState, ModRoute, SeqLayer } from '../state/types';
+import type { AppState, BinState, ModRoute, SeqLayer } from '../state/types';
 import type { FxState } from '../state/types';
 import type { ChorusMode, FilterType } from '../state/types';
 import { coreSchema } from '../core/settings';
 import {
   pageModel, type Domain, type PageControl, type PageCoupling, type PageFilterControls, type PageFxModule,
-  type PageLayers, type PageScale, type PageTargetGroup,
+  type PageBinaural, type PageLayers, type PageScale, type PageTargetGroup,
 } from '../core/settings';
 
 export {
@@ -174,3 +174,26 @@ export function soundMode(name: string): SeqLayer['mode'] {
 
 /** The tempo and each layer's sliders, from the core. */
 export const layersPage = (): PageLayers => pageModel().layers;
+
+// ---------------------------------------------------------------------------
+// Space and the binaural beat
+
+/** The binaural section's controls, from the core. */
+export const binauralPage = (): PageBinaural => pageModel().binaural;
+
+/** The neutral section: still, narrow — what a point without one sounds like. */
+function neutralBin(): BinState {
+  return { on: false, beat: binauralPage().beat.min, width: 0 };
+}
+
+/** The point's space as it is, without touching the point (a neutral
+ *  section is left out of a point, and opening the page is not an edit). */
+export function binOf(s: Readonly<Pick<AppState, 'bin'>>): BinState {
+  return s.bin ?? neutralBin();
+}
+
+/** The point's space, made writable. */
+export function writableBin(s: Pick<AppState, 'bin'>): BinState {
+  s.bin ??= neutralBin();
+  return s.bin;
+}

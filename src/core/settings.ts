@@ -31,8 +31,19 @@ export interface PageLayers {
   customRhythm: string;
 }
 
+/** Space and the binaural beat on the page: the beat's switch, its rate,
+ *  the width. Each voice's azimuth is a slider of its own card. */
+export interface PageBinaural {
+  title: string;
+  tag: string;
+  on: string;
+  beat: PageControl;
+  width: PageControl;
+}
+
 export interface SettingsPageModel {
   layers: PageLayers;
+  binaural: PageBinaural;
   fxModules: PageFxModule[];
   filterControls: Record<string, PageFilterControls>;
   vowels: string[];
@@ -65,6 +76,8 @@ export interface CoreSchema {
   seqLayers: number;
   seqDescription: string;
   seqLayerDescription: string;
+  /** What the binaural section is. */
+  binDescription: string;
 }
 
 export interface FxPreset { name: string; group: string; fx: Partial<FxState> }

@@ -669,6 +669,22 @@ them as 1-…).
     step the address is clean and the last point comes from localStorage,
     as before. (`N` is the preset's index: presets are only appended.)
 
+34. **Stereo, with space and binaural beats** *(synesthesia-core
+    PLAN-BINAURAL.md, agreed 2026-10-15; the web app on core `a48d98f`,
+    2026-10-17)*. The worklet plays the core's stereo player
+    (`AudioCore.createStereo`, `renderStereo`: one interleaved view onto
+    wasm memory, split into the node's two channels without allocating);
+    the bench and ballast players are stereo too, so they price what is
+    played. Always stereo — no speakers/headphones switch: a point without
+    `bin` plays the mono sound in both ears bit for bit, and a wide one is
+    ordinary stereo on speakers; only the beat needs headphones (on one
+    speaker it is a tremolo). ⚙ Settings: *Space* after the effects (width;
+    Beat and its rate, the rate hidden while the beat is off; both LFO
+    targets), an azimuth on every formula card (from the schema) and every
+    layer. A centred `az` is never written, so the page reads a missing
+    slider as its default. The analysis, the picture and the scout hear the
+    mono downmix (the core's decision 6).
+
 ## Architecture
 
 Since the swap (PLAN-CORE.md phase 9, 2026-10-06) the model is

@@ -121,6 +121,26 @@ test('a point with layers keeps them', async () => {
   assert.notEqual((await without.json()).id, id);
 });
 
+test('a point with space and a beat keeps them', async () => {
+  const point = {
+    preset_name: 'Wide',
+    audio: { formulas: { fm: { enabled: true, params: { az: -40 } } } },
+    seq: { cps: 0.5, layers: [{ on: true, sound: 'owl:1', pattern: '0 ~', gain: 0.4, speed: 1, density: 1, dry: false, mode: 'hits', az: 60 }] },
+    bin: { on: true, beat: 6, width: 0.7 },
+  };
+  const res = await post(point);
+  assert.equal(res.status, 201, await res.clone().text());
+  const { id } = await res.json();
+  const state = await (await call(`/v1/points/${id}`)).json();
+  assert.deepEqual(state.bin, { on: true, beat: 6, width: 0.7 }, 'the binaural section was stored');
+  assert.equal(state.audio.formulas.fm.params.az, -40, 'a voice keeps its azimuth');
+  assert.equal(state.seq.layers[0].az, 60, 'a layer keeps its azimuth');
+
+  // the same point, narrow and still, is another point
+  const { bin: _bin, ...narrow } = point;
+  assert.notEqual((await (await post(narrow)).json()).id, id);
+});
+
 test('rejects malformed input', async () => {
   assert.equal((await post('{not json')).status, 400);
   assert.equal((await post('"a string"')).status, 422);

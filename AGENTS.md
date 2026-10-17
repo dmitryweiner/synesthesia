@@ -35,7 +35,7 @@ npm run bench:serve # HTTPS dev server on the LAN: open /core-bench.html on a ph
 npm run smoke     # Playwright: boot, sound, 👍/👎/🎲/undo, every preset,
                   # ?preset=N, save+reload, share link in a 2nd tab, scout,
                   # ⚙ Settings (picture paused, sound heard, one undo step,
-                  # a layer's pattern checked as typed), Night meadow's
+                  # a layer's pattern checked as typed, Space kept), Night meadow's
                   # recorded sounds reaching the worklet.
                   # The ONLY check of WebGL2/Web Audio (vitest can't load them)
 npm run snap -- --out shots/x.png [--preset N] [--sound] [--like N] [--dislike N]
@@ -239,8 +239,9 @@ src/core/              the core's wasm (syn-wasm), typed for the page:
                        picture's frames, pictureMetrics (analyze --picture)
   audio.ts, protocol.ts  compile the module, start the worklet node;
                        main ↔ worklet messages
-src/worklet/core.ts    the AudioWorklet hosting syn-player: renders into a
-                       view onto wasm memory (no per-quantum allocation),
+src/worklet/core.ts    the AudioWorklet hosting syn-player, stereo (PLAN.md
+                       #34): renders L R interleaved into a view onto wasm
+                       memory, split into two channels (no per-quantum allocation),
                        posts feature frames + onset hits. textPolyfill.ts:
                        the worklet scope has no TextDecoder/TextEncoder
 src/audio/coreEngine.ts  the live sound: points in as JSON (applyState =

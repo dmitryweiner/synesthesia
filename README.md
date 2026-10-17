@@ -29,6 +29,15 @@ you don't, and the search follows.
   `hh*8?`), or looped under everything. Five built-in presets use them
   (*Night meadow*, *Workshop*, *Glass loom*, *Magic forest*, *Sea
   shore*). The picture follows the hits without strobing.
+- **Space and binaural beats — on headphones.** The sound is stereo: each
+  formula and layer has an azimuth, and a point's *width* spreads them
+  around the head (a structural head model: the far ear hears a voice
+  later and darker) and widens the reverb and the chorus. A point can
+  also *beat*: the left ear hears the whole sound a few hertz below the
+  right, and the brain hears the difference as a slow pulse (0.5–40 Hz).
+  Both are genes, so 👍/👎 find them; a point that is neither wide nor
+  beating sounds exactly as before. On a phone's single speaker the beat
+  becomes an ordinary tremolo — use headphones.
 - **Shared modulation.** An LFO route can target a synth parameter, an FX
   parameter or an image parameter. The built-in presets use this: in
   *Fractal garden* the same 77-second triangle sweeps the logistic map
@@ -73,9 +82,10 @@ you don't, and the search follows.
 **⚙ Settings — for the curious.** A full-screen page with every parameter
 of the current point, in two tabs. *Audio* is formula-synth's panel: the
 formula cards (up to 5 on at once), the layers (a sound, hits or a loop,
-a rhythm or your own pattern, gain, speed, density, humanize), the effects
-chain with its one-module presets, the master volume and the LFO routes to
-sound. *Video* is
+a rhythm or your own pattern, gain, speed, density, humanize, azimuth), the effects
+chain with its one-module presets, *Space* (width, the binaural beat and its
+rate; each formula's azimuth is a slider of its card), the master volume and
+the LFO routes to sound. *Video* is
 chromaflux's: the reaction, field-variation, flow and palette cards, the
 sound → image links and the LFO routes to the picture. The 4 LFOs are
 shared, so both tabs show them. Sound changes are heard as you make them;

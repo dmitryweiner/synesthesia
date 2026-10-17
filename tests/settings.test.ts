@@ -76,3 +76,22 @@ describe('the layers on the page', () => {
     expect(soundName('great-tit')).toBe('great-tit');
   });
 });
+
+describe('the binaural section on the page', () => {
+  it('reading leaves a point without space as it was; writing makes the core\'s neutral section', async () => {
+    const { binOf, binauralPage, writableBin } = await import('../src/ui/settingsModel');
+    const { sanitize } = await import('../src/core/point');
+    const page = binauralPage();
+    expect([page.width.k, page.beat.k]).toEqual(['width', 'beat']);
+    const point: Pick<import('../src/state/types').AppState, 'bin'> = {};
+    expect(binOf(point)).toEqual({ on: false, beat: page.beat.min, width: 0 });
+    expect('bin' in point).toBe(false);
+    writableBin(point).width = 0.6;
+    expect(point.bin).toEqual({ on: false, beat: page.beat.min, width: 0.6 });
+    // the core keeps what the page wrote, and drops a neutral section
+    const { defaultPoint } = await import('./points');
+    const wide = sanitize({ ...defaultPoint(), bin: { on: true, beat: 6, width: 0.6 } });
+    expect(wide?.bin).toEqual({ on: true, beat: 6, width: 0.6 });
+    expect(sanitize({ ...defaultPoint(), bin: binOf({}) })?.bin).toBeUndefined();
+  });
+});
